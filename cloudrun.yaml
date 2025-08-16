@@ -1,0 +1,22 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: analytics-kpi-poc
+spec:
+  template:
+    spec:
+      containers:
+        - image: gcr.io/PROJECT_ID/analytics-kpi-poc:latest
+          env:
+            - name: PROJECT_ID
+              value: PROJECT_ID
+            - name: BQ_LOCATION
+              value: US
+            - name: BQ_EMBEDDINGS_DATASET
+              value: analytics_poc
+            - name: EMBEDDING_MODE
+              value: bigquery
+            - name: BQ_EMBEDDING_MODEL_FQN
+              value: PROJECT_ID.analytics_poc.embedding_model
+          ports:
+            - containerPort: 8080
