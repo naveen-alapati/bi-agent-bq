@@ -78,6 +78,7 @@ class BigQueryService:
         """
         job_config = bigquery.QueryJobConfig()
         loc = self._get_dataset_location(dataset_id) or self.location
+        print(f"BQ QUERY location={loc} sql=SELECT * FROM `{self.project_id}.{dataset_id}.{table_id}` LIMIT {int(limit)}")
         query_job = self.client.query(sql, job_config=job_config, location=loc)
         rows = [dict(row) for row in query_job]
         return rows
@@ -85,6 +86,10 @@ class BigQueryService:
     def query_rows(self, sql: str) -> List[Dict[str, Any]]:
         job_config = bigquery.QueryJobConfig()
         loc = self._infer_location_from_sql(sql) or self.location
+        preview = sql.replace("\n", " ")
+        if len(preview) > 400:
+            preview = preview[:400] + "..."
+        print(f"BQ QUERY location={loc} sql={preview}")
         query_job = self.client.query(sql, job_config=job_config, location=loc)
         results = [dict(row) for row in query_job]
         normalized: List[Dict[str, Any]] = []
@@ -182,6 +187,7 @@ class BigQueryService:
           {union_sql}
         ) AS src
         """
+        print(f"BQ QUERY location={self.location} sql=INSERT INTO `{target_table_fqn}` ...")
         self.client.query(sql, location=self.location).result()
         return 0
 
@@ -211,6 +217,7 @@ class BigQueryService:
             ]
         )
         loc = self._get_dataset_location(embeddings_dataset) or self.location
+        print(f"BQ QUERY location={loc} sql=VECTOR_SEARCH on {table_fqn}")
         results = self.client.query(sql, job_config=job_config, location=loc).result()
         return [
             {"object_ref": r["object_ref"], "content": r["content"], "dist": float(r["dist"]) if r["dist"] is not None else None}
@@ -237,6 +244,7 @@ class BigQueryService:
             ]
         )
         loc = self._get_dataset_location(embeddings_dataset) or self.location
+        print(f"BQ QUERY location={loc} sql=VECTOR_SEARCH on {table_fqn}")
         results = self.client.query(sql, job_config=job_config, location=loc).result()
         return [
             {"object_ref": r["object_ref"], "content": r["content"], "dist": float(r["dist"]) if r["dist"] is not None else None}
