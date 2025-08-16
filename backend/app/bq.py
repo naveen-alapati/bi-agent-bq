@@ -4,6 +4,8 @@ from google.api_core.exceptions import NotFound, Conflict
 import json
 import os
 import re
+from datetime import date, datetime, time
+from decimal import Decimal
 
 
 class BigQueryService:
@@ -40,6 +42,19 @@ class BigQueryService:
             if proj == self.project_id:
                 return self._get_dataset_location(ds)
         return None
+
+    def _normalize_value(self, v: Any) -> Any:
+        if isinstance(v, bytes):
+            return v.decode("utf-8")
+        if isinstance(v, (datetime, date, time)):
+            return v.isoformat()
+        if isinstance(v, Decimal):
+            return float(v)
+        if isinstance(v, list):
+            return [self._normalize_value(x) for x in v]
+        if isinstance(v, dict):
+            return {k: self._normalize_value(val) for k, val in v.items()}
+        return v
 
     def list_datasets(self) -> List[Dict[str, Any]]:
         datasets = []
@@ -80,7 +95,10 @@ class BigQueryService:
         loc = self._get_dataset_location(dataset_id) or self.location
         print(f"BQ QUERY location={loc} sql=SELECT * FROM `{self.project_id}.{dataset_id}.{table_id}` LIMIT {int(limit)}")
         query_job = self.client.query(sql, job_config=job_config, location=loc)
-        rows = [dict(row) for row in query_job]
+        rows: List[Dict[str, Any]] = []
+        for row in query_job:
+            row_dict = dict(row)
+            rows.append({k: self._normalize_value(v) for k, v in row_dict.items()})
         return rows
 
     def query_rows(self, sql: str) -> List[Dict[str, Any]]:
@@ -91,17 +109,11 @@ class BigQueryService:
             preview = preview[:400] + "..."
         print(f"BQ QUERY location={loc} sql={preview}")
         query_job = self.client.query(sql, job_config=job_config, location=loc)
-        results = [dict(row) for row in query_job]
-        normalized: List[Dict[str, Any]] = []
-        for row in results:
-            out: Dict[str, Any] = {}
-            for k, v in row.items():
-                if isinstance(v, bytes):
-                    out[k] = v.decode("utf-8")
-                else:
-                    out[k] = v
-            normalized.append(out)
-        return normalized
+        results: List[Dict[str, Any]] = []
+        for row in query_job:
+            row_dict = dict(row)
+            results.append({k: self._normalize_value(v) for k, v in row_dict.items()})
+        return results
 
     def ensure_dataset(self, dataset_id: str) -> None:
         ds_ref = bigquery.Dataset(f"{self.project_id}.{dataset_id}")
