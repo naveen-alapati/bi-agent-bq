@@ -77,16 +77,15 @@ class BigQueryService:
         LIMIT {int(limit)}
         """
         job_config = bigquery.QueryJobConfig()
-        job_config.location = self._get_dataset_location(dataset_id) or self.location
-        query_job = self.client.query(sql, job_config=job_config)
+        loc = self._get_dataset_location(dataset_id) or self.location
+        query_job = self.client.query(sql, job_config=job_config, location=loc)
         rows = [dict(row) for row in query_job]
         return rows
 
     def query_rows(self, sql: str) -> List[Dict[str, Any]]:
         job_config = bigquery.QueryJobConfig()
-        inferred = self._infer_location_from_sql(sql)
-        job_config.location = inferred or self.location
-        query_job = self.client.query(sql, job_config=job_config)
+        loc = self._infer_location_from_sql(sql) or self.location
+        query_job = self.client.query(sql, job_config=job_config, location=loc)
         results = [dict(row) for row in query_job]
         normalized: List[Dict[str, Any]] = []
         for row in results:
@@ -134,7 +133,7 @@ class BigQueryService:
 
     def count_rows(self, table_fqn: str) -> int:
         sql = f"SELECT COUNT(*) as c FROM `{table_fqn}`"
-        res = list(self.client.query(sql, job_config=bigquery.QueryJobConfig(location=self.location)))
+        res = list(self.client.query(sql, location=self.location))
         return int(res[0]["c"]) if res else 0
 
     def create_vector_index_if_needed(self, table_fqn: str, index_name: str = "idx_table_embeddings") -> Optional[str]:
@@ -144,7 +143,7 @@ class BigQueryService:
         OPTIONS(index_type='IVF', distance_type='COSINE')
         """
         try:
-            self.client.query(create_sql, job_config=bigquery.QueryJobConfig(location=self.location)).result()
+            self.client.query(create_sql, location=self.location).result()
             return index_name
         except Conflict:
             return index_name
@@ -183,9 +182,8 @@ class BigQueryService:
           {union_sql}
         ) AS src
         """
-        job = self.client.query(sql, job_config=bigquery.QueryJobConfig(location=self.location))
-        job.result()
-        return job.num_dml_affected_rows or 0
+        self.client.query(sql, location=self.location).result()
+        return 0
 
     def vector_search_topk_by_summary(self, embeddings_dataset: str, dataset_id: str, table_id: str, k: int = 10) -> List[Dict[str, Any]]:
         table_fqn = f"{self.project_id}.{embeddings_dataset}.table_embeddings"
@@ -210,10 +208,10 @@ class BigQueryService:
                 bigquery.ScalarQueryParameter("ds", "STRING", dataset_id),
                 bigquery.ScalarQueryParameter("tb", "STRING", table_id),
                 bigquery.ScalarQueryParameter("k", "INT64", int(k)),
-            ],
-            location=self._get_dataset_location(embeddings_dataset) or self.location,
+            ]
         )
-        results = self.client.query(sql, job_config=job_config).result()
+        loc = self._get_dataset_location(embeddings_dataset) or self.location
+        results = self.client.query(sql, job_config=job_config, location=loc).result()
         return [
             {"object_ref": r["object_ref"], "content": r["content"], "dist": float(r["dist"]) if r["dist"] is not None else None}
             for r in results
@@ -236,10 +234,10 @@ class BigQueryService:
                 bigquery.ScalarQueryParameter("ds", "STRING", dataset_id),
                 bigquery.ScalarQueryParameter("tb", "STRING", table_id),
                 bigquery.ScalarQueryParameter("k", "INT64", int(k)),
-            ],
-            location=self._get_dataset_location(embeddings_dataset) or self.location,
+            ]
         )
-        results = self.client.query(sql, job_config=job_config).result()
+        loc = self._get_dataset_location(embeddings_dataset) or self.location
+        results = self.client.query(sql, job_config=job_config, location=loc).result()
         return [
             {"object_ref": r["object_ref"], "content": r["content"], "dist": float(r["dist"]) if r["dist"] is not None else None}
             for r in results
