@@ -23,7 +23,6 @@ class LLMClient:
         from google.cloud import aiplatform
         from vertexai.preview.generative_models import GenerativeModel
 
-        # Initialize with project and location
         aiplatform.init(project=self.project_id, location=self.vertex_location)
         model = GenerativeModel(self.vertex_model)
         prompt = f"SYSTEM: {system_prompt}\n\nINPUT_DATA: {user_prompt}"
@@ -41,3 +40,23 @@ class LLMClient:
         resp = client.chat.completions.create(model=self.openai_model, messages=messages, response_format={"type": "json_object"})
         text = resp.choices[0].message.content
         return json.loads(text)
+
+    def diagnostics(self) -> Dict[str, Any]:
+        try:
+            if self.provider == "vertex":
+                from google.cloud import aiplatform
+                from vertexai.preview.generative_models import GenerativeModel
+                aiplatform.init(project=self.project_id, location=self.vertex_location)
+                model = GenerativeModel(self.vertex_model)
+                result = model.generate_content("SYSTEM: respond with {\"ok\":true}")
+                text = result.candidates[0].content.parts[0].text
+                return {"provider": "vertex", "ok": True, "raw": text}
+            elif self.provider == "openai":
+                from openai import OpenAI
+                client = OpenAI(api_key=self.openai_api_key)
+                resp = client.chat.completions.create(model=self.openai_model, messages=[{"role": "user", "content": "{\"ok\":true}"}], response_format={"type":"json_object"})
+                return {"provider": "openai", "ok": True, "raw": resp.choices[0].message.content}
+            else:
+                return {"provider": self.provider, "ok": False, "error": "unsupported provider"}
+        except Exception as exc:
+            return {"provider": self.provider, "ok": False, "error": str(exc)}
