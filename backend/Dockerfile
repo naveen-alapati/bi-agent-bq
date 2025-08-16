@@ -15,9 +15,9 @@ RUN pip install -r /app/requirements.txt
 
 COPY backend /app
 
-# If frontend build exists, copy into /app/app/static
-RUN mkdir -p /app/app/static
-COPY frontend/dist /app/app/static
+# If frontend build exists, copy into /app/static
+RUN mkdir -p /app/static
+COPY frontend/dist /app/static
 
 EXPOSE 8080
 

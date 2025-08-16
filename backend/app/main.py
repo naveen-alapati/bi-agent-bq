@@ -105,8 +105,7 @@ def run_kpi(req: RunKpiRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-# Serve built SPA if present (mounted under /app for safety)
-static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
-static_dir = os.path.abspath(static_dir)
+# Serve built SPA (Dockerfile copies frontend/dist to /app/static)
+static_dir = os.path.abspath(os.getenv("STATIC_DIR", "/app/static"))
 if os.path.isdir(static_dir):
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
