@@ -57,4 +57,4 @@ jobs:
             --region ${{ secrets.GCP_REGION }} \
             --allow-unauthenticated \
             --quiet \
-            --set-env-vars PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},BQ_LOCATION=US,BQ_EMBEDDINGS_DATASET=analytics_poc,EMBEDDING_MODE=bigquery,BQ_EMBEDDING_MODEL_FQN=${{ secrets.GCP_PROJECT_ID }}.analytics_poc.embedding_model
+            --set-env-vars PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},BQ_LOCATION=${{ secrets.GCP_REGION }},BQ_EMBEDDINGS_DATASET=analytics_poc,EMBEDDING_MODE=vertex,LLM_PROVIDER=vertex,VERTEX_LOCATION=${{ secrets.VERTEX_LOCATION }}
