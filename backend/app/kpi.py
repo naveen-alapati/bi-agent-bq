@@ -128,32 +128,167 @@ class KPIService:
             )
         return json.dumps({"tables": infos})
 
-    def generate_kpis(self, tables: List[TableRef], k: int = 5) -> List[KPIItem]:
-        all_items: List[KPIItem] = []
-        for t in tables:
-            system_prompt = SYSTEM_PROMPT.format(k=k)
-            user_prompt = self._build_input_json([t])
-            result = self.llm.generate_json(system_prompt, user_prompt)
-            table_slug = f"{t.datasetId}.{t.tableId}"
-            count = 0
-            for item in result.get("kpis", []):
-                if count >= k:
+    def _fallback_kpis_for_table(self, dataset_id: str, table_id: str, k: int) -> List[KPIItem]:
+        """Generate simple, safe KPIs without LLM, based on schema heuristics."""
+        try:
+            schema = self.bq.get_table_schema(dataset_id, table_id)
+        except Exception:
+            schema = []
+        project = self.project_id
+        table_fqn = f"`{project}.{dataset_id}.{table_id}`"
+        kpis: List[KPIItem] = []
+
+        # Helpers to pick columns
+        def find_col(types: List[str]) -> Any:
+            for col in schema:
+                if col.get("type", "").upper() in types:
+                    return col["name"], col["type"].upper()
+            return None, None
+
+        # 1) Timeseries: monthly count by first date/time column
+        date_name, date_type = find_col(["DATE", "TIMESTAMP", "DATETIME"])
+        if date_name and len(kpis) < k:
+            if date_type == "DATE":
+                sql = (
+                    f"SELECT FORMAT_DATE(\"%Y-%m\", DATE_TRUNC({date_name}, MONTH)) AS x, COUNT(*) AS y "
+                    f"FROM {table_fqn} WHERE {date_name} IS NOT NULL GROUP BY x ORDER BY x"
+                )
+            elif date_type == "TIMESTAMP":
+                sql = (
+                    f"SELECT FORMAT_TIMESTAMP(\"%Y-%m\", TIMESTAMP_TRUNC({date_name}, MONTH)) AS x, COUNT(*) AS y "
+                    f"FROM {table_fqn} WHERE {date_name} IS NOT NULL GROUP BY x ORDER BY x"
+                )
+            else:  # DATETIME
+                sql = (
+                    f"SELECT FORMAT_DATETIME(\"%Y-%m\", DATETIME_TRUNC({date_name}, MONTH)) AS x, COUNT(*) AS y "
+                    f"FROM {table_fqn} WHERE {date_name} IS NOT NULL GROUP BY x ORDER BY x"
+                )
+            kpis.append(
+                KPIItem(
+                    id=f"{dataset_id}.{table_id}:ts_count",
+                    name="Monthly row count",
+                    short_description=f"Monthly counts by {date_name}",
+                    chart_type="line",
+                    d3_chart="d3.line() with x=month, y=count",
+                    expected_schema="timeseries {x:STRING, y:NUMBER}",
+                    sql=sql,
+                )
+            )
+
+        # 2) Categorical: top categories by first STRING column
+        str_name, _ = find_col(["STRING"])
+        if str_name and len(kpis) < k:
+            sql = (
+                f"SELECT COALESCE({str_name}, 'UNKNOWN') AS label, COUNT(*) AS value "
+                f"FROM {table_fqn} GROUP BY label ORDER BY value DESC LIMIT 10"
+            )
+            kpis.append(
+                KPIItem(
+                    id=f"{dataset_id}.{table_id}:top_{str_name}",
+                    name=f"Top {str_name}",
+                    short_description=f"Most frequent values of {str_name}",
+                    chart_type="bar",
+                    d3_chart="d3.bar() with label,value",
+                    expected_schema="categorical {label:STRING, value:NUMBER}",
+                    sql=sql,
+                )
+            )
+
+        # 3) Numeric distribution by first numeric column
+        num_name, _ = find_col(["INT64", "FLOAT64", "NUMERIC", "BIGNUMERIC"])
+        if num_name and len(kpis) < k:
+            sql = (
+                f"SELECT CAST(ROUND(CAST({num_name} AS FLOAT64), 0) AS STRING) AS label, COUNT(*) AS value "
+                f"FROM {table_fqn} WHERE {num_name} IS NOT NULL GROUP BY label ORDER BY value DESC LIMIT 20"
+            )
+            kpis.append(
+                KPIItem(
+                    id=f"{dataset_id}.{table_id}:dist_{num_name}",
+                    name=f"Distribution of {num_name}",
+                    short_description=f"Count by rounded {num_name}",
+                    chart_type="bar",
+                    d3_chart="d3.bar() with label,value",
+                    expected_schema="distribution {label:STRING, value:NUMBER}",
+                    sql=sql,
+                )
+            )
+
+        # 4) Scatter of first two numeric columns
+        if len(kpis) < k:
+            first_num, _ = find_col(["INT64", "FLOAT64", "NUMERIC", "BIGNUMERIC"])
+            second_num = None
+            for col in schema:
+                if col["name"] != first_num and col.get("type", "").upper() in ["INT64", "FLOAT64", "NUMERIC", "BIGNUMERIC"]:
+                    second_num = col["name"]
                     break
-                sql = item.get("sql", "")
-                expected_schema = item.get("expected_schema", "")
-                if not sql or not expected_schema:
-                    continue
-                slug = item.get("id", f"kpi_{count+1}")
-                all_items.append(
+            if first_num and second_num and len(kpis) < k:
+                sql = (
+                    f"SELECT CAST({first_num} AS FLOAT64) AS x, CAST({second_num} AS FLOAT64) AS y "
+                    f"FROM {table_fqn} WHERE {first_num} IS NOT NULL AND {second_num} IS NOT NULL LIMIT 500"
+                )
+                kpis.append(
                     KPIItem(
-                        id=f"{table_slug}:{slug}",
-                        name=item.get("name", "KPI"),
-                        short_description=item.get("short_description", ""),
-                        chart_type=item.get("chart_type", "bar"),
-                        d3_chart=item.get("d3_chart", ""),
-                        expected_schema=expected_schema,
+                        id=f"{dataset_id}.{table_id}:scatter_{first_num}_{second_num}",
+                        name=f"Scatter: {first_num} vs {second_num}",
+                        short_description=f"Sample of {first_num} vs {second_num}",
+                        chart_type="scatter",
+                        d3_chart="d3.scatter() with x,y",
+                        expected_schema="scatter {x:NUMBER, y:NUMBER}",
                         sql=sql,
                     )
                 )
-                count += 1
+
+        # 5) Total rows as single bar
+        if len(kpis) < k:
+            sql = f"SELECT 'rows' AS label, COUNT(*) AS value FROM {table_fqn}"
+            kpis.append(
+                KPIItem(
+                    id=f"{dataset_id}.{table_id}:row_count",
+                    name="Total rows",
+                    short_description="Total row count",
+                    chart_type="bar",
+                    d3_chart="d3.bar() with label,value",
+                    expected_schema="categorical {label:STRING, value:NUMBER}",
+                    sql=sql,
+                )
+            )
+
+        return kpis[:k]
+
+    def generate_kpis(self, tables: List[TableRef], k: int = 5) -> List[KPIItem]:
+        all_items: List[KPIItem] = []
+        for t in tables:
+            # Try LLM
+            try:
+                system_prompt = SYSTEM_PROMPT.format(k=k)
+                user_prompt = self._build_input_json([t])
+                result = self.llm.generate_json(system_prompt, user_prompt)
+                table_slug = f"{t.datasetId}.{t.tableId}"
+                count = 0
+                for item in result.get("kpis", []):
+                    if count >= k:
+                        break
+                    sql = item.get("sql", "")
+                    expected_schema = item.get("expected_schema", "")
+                    if not sql or not expected_schema:
+                        continue
+                    slug = item.get("id", f"kpi_{count+1}")
+                    all_items.append(
+                        KPIItem(
+                            id=f"{table_slug}:{slug}",
+                            name=item.get("name", "KPI"),
+                            short_description=item.get("short_description", ""),
+                            chart_type=item.get("chart_type", "bar"),
+                            d3_chart=item.get("d3_chart", ""),
+                            expected_schema=expected_schema,
+                            sql=sql,
+                        )
+                    )
+                    count += 1
+                # If LLM returned too few, top up with fallback
+                if count < k:
+                    all_items.extend(self._fallback_kpis_for_table(t.datasetId, t.tableId, k - count))
+            except Exception:
+                # Fallback path
+                all_items.extend(self._fallback_kpis_for_table(t.datasetId, t.tableId, k))
         return all_items
