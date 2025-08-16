@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
 import time
 import traceback
+import os
 
 from .bq import BigQueryService
 from .kpi import KPIService
@@ -15,8 +16,17 @@ def run_self_test(
     sample_rows: int = 3,
     kpis_k: int = 3,
     run_kpis_limit: int = 2,
+    force_llm: bool = True,
 ) -> Dict[str, Any]:
     results: Dict[str, Any] = {"steps": []}
+
+    # LLM diagnostics
+    try:
+        llm_diag = kpi.llm.diagnostics()
+        results["llm"] = llm_diag
+        results["steps"].append({"step": "llm", "status": "ok" if llm_diag.get("ok") else "error", "provider": llm_diag.get("provider"), "detail": llm_diag})
+    except Exception as exc:
+        results["steps"].append({"step": "llm", "status": "error", "error": str(exc), "stack": traceback.format_exc()})
 
     # Step: datasets
     try:
@@ -29,7 +39,6 @@ def run_self_test(
         results["steps"].append({"step": "list_datasets", "status": "error", "error": str(exc), "stack": traceback.format_exc()})
         return results
 
-    # Choose dataset
     chosen_dataset = dataset
     if not chosen_dataset:
         if any(d.get("datasetId") == "ecom" for d in datasets):
@@ -65,7 +74,9 @@ def run_self_test(
     except Exception as exc:
         results["steps"].append({"step": "prepare", "status": "error", "error": str(exc), "stack": traceback.format_exc()})
 
-    # Step: generate_kpis
+    # Step: generate_kpis (LLM-only if requested)
+    if force_llm:
+        os.environ["KPI_FALLBACK_ENABLED"] = "false"
     try:
         t0 = time.time()
         kpis = kpi.generate_kpis(selected_tables, k=kpis_k)
