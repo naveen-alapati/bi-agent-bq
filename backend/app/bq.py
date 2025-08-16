@@ -8,8 +8,8 @@ import os
 class BigQueryService:
     def __init__(self, project_id: Optional[str], location: str = "US") -> None:
         self.project_id = project_id
-        self.location = location
-        self.client = bigquery.Client(project=project_id, location=location)
+        self.location = os.getenv("BQ_LOCATION", location)
+        self.client = bigquery.Client(project=project_id, location=self.location)
 
     def list_datasets(self) -> List[Dict[str, Any]]:
         # Avoid get_dataset calls to minimize permissions; show ids only
@@ -48,12 +48,16 @@ class BigQueryService:
         SELECT * FROM `{self.project_id}.{dataset_id}.{table_id}`
         LIMIT {int(limit)}
         """
-        query_job = self.client.query(sql)
+        job_config = bigquery.QueryJobConfig()
+        job_config.location = self.location
+        query_job = self.client.query(sql, job_config=job_config)
         rows = [dict(row) for row in query_job]
         return rows
 
     def query_rows(self, sql: str) -> List[Dict[str, Any]]:
-        query_job = self.client.query(sql)
+        job_config = bigquery.QueryJobConfig()
+        job_config.location = self.location
+        query_job = self.client.query(sql, job_config=job_config)
         results = [dict(row) for row in query_job]
         # Ensure JSON serializable: convert bytes to str etc
         normalized: List[Dict[str, Any]] = []
@@ -102,7 +106,7 @@ class BigQueryService:
 
     def count_rows(self, table_fqn: str) -> int:
         sql = f"SELECT COUNT(*) as c FROM `{table_fqn}`"
-        res = list(self.client.query(sql))
+        res = list(self.client.query(sql, job_config=bigquery.QueryJobConfig(location=self.location)))
         return int(res[0]["c"]) if res else 0
 
     def create_vector_index_if_needed(self, table_fqn: str, index_name: str = "idx_table_embeddings") -> Optional[str]:
@@ -113,7 +117,7 @@ class BigQueryService:
         OPTIONS(index_type='IVF', distance_type='COSINE')
         """
         try:
-            self.client.query(create_sql).result()
+            self.client.query(create_sql, job_config=bigquery.QueryJobConfig(location=self.location)).result()
             return index_name
         except Conflict:
             return index_name
@@ -158,7 +162,7 @@ class BigQueryService:
           {union_sql}
         ) AS src
         """
-        job = self.client.query(sql)
+        job = self.client.query(sql, job_config=bigquery.QueryJobConfig(location=self.location))
         job.result()
         return job.num_dml_affected_rows or 0
 
@@ -185,7 +189,8 @@ class BigQueryService:
                 bigquery.ScalarQueryParameter("ds", "STRING", dataset_id),
                 bigquery.ScalarQueryParameter("tb", "STRING", table_id),
                 bigquery.ScalarQueryParameter("k", "INT64", int(k)),
-            ]
+            ],
+            location=self.location,
         )
         results = self.client.query(sql, job_config=job_config).result()
         return [
@@ -210,7 +215,8 @@ class BigQueryService:
                 bigquery.ScalarQueryParameter("ds", "STRING", dataset_id),
                 bigquery.ScalarQueryParameter("tb", "STRING", table_id),
                 bigquery.ScalarQueryParameter("k", "INT64", int(k)),
-            ]
+            ],
+            location=self.location,
         )
         results = self.client.query(sql, job_config=job_config).result()
         return [
