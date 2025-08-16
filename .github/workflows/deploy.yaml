@@ -50,6 +50,17 @@ jobs:
           docker push $IMAGE
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
+      - name: Remove prior secret-mapped env var (if any)
+        run: |
+          gcloud run services update analytics-kpi-poc \
+            --region ${{ secrets.GCP_REGION }} \
+            --quiet \
+            --remove-secrets GEMINI_API_KEY || true
+          gcloud run services update analytics-kpi-poc \
+            --region ${{ secrets.GCP_REGION }} \
+            --quiet \
+            --remove-env-vars GEMINI_API_KEY || true
+
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy analytics-kpi-poc \
@@ -57,5 +68,4 @@ jobs:
             --region ${{ secrets.GCP_REGION }} \
             --allow-unauthenticated \
             --quiet \
-            --remove-secrets GEMINI_API_KEY \
             --set-env-vars PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},BQ_LOCATION=${{ secrets.GCP_REGION }},BQ_EMBEDDINGS_DATASET=analytics_poc,LLM_PROVIDER=gemini,GEMINI_MODEL=gemini-2.0-flash,GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
