@@ -10,16 +10,17 @@ from .models import TableRef, PreparedTable, KPIItem
 from .llm import LLMClient
 
 
-SYSTEM_PROMPT = (
+SYSTEM_PROMPT_TEMPLATE = (
     "You are a data analyst that only outputs JSON (no commentary). Use BigQuery SQL standard dialect. "
     "The user wants the Top {k} KPIs for the dataset/table(s) described below. For each KPI produce: "
     "- id (short slug), - name, - short_description (1 sentence), - chart_type (one of: line, bar, pie, area, scatter), "
     "- d3_chart (a short suggestion: e.g. \"d3.line() with x=date, y=value\", or \"d3.bar() with label,value\"), "
-    "- expected_schema (one of: timeseries {x:DATE|TIMESTAMP or STRING, y:NUMBER}, categorical {label:STRING, value:NUMBER}, distribution {label, value}), "
+    "- expected_schema (one of: timeseries {{x:DATE|TIMESTAMP or STRING, y:NUMBER}}, categorical {{label:STRING, value:NUMBER}}, distribution {{label, value}}), "
     "- sql (BigQuery standard SQL) — this SQL must be ready-to-run and must return columns that match expected_schema. "
     "Use the table reference exactly as `project.dataset.table`. If using aggregation, alias columns exactly to x,y or label,value depending on expected_schema. "
     "Keep SQL simple and efficient (use LIMIT where useful). Use safe handling for NULLs. "
-    "Return value: JSON object: { \"kpis\": [ {id, name, short_description, chart_type, d3_chart, expected_schema, sql }, ... ] }"
+    "INPUT_DATA is a JSON object. "
+    "Return value: JSON object: {{ \"kpis\": [ {{id, name, short_description, chart_type, d3_chart, expected_schema, sql }} , ... ] }}"
 )
 
 
@@ -130,7 +131,7 @@ class KPIService:
     def generate_kpis(self, tables: List[TableRef], k: int = 5) -> List[KPIItem]:
         all_items: List[KPIItem] = []
         for t in tables:
-            system_prompt = SYSTEM_PROMPT.format(k=k)
+            system_prompt = SYSTEM_PROMPT_TEMPLATE.format(k=k)
             user_prompt = self._build_input_json([t])
             try:
                 result = self.llm.generate_json(system_prompt, user_prompt)
