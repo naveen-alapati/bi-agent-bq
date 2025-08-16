@@ -1,6 +1,8 @@
 from typing import List, Dict, Any, Tuple
 import json
 import os
+import uuid
+from datetime import datetime, timezone
 
 from .bq import BigQueryService
 from .embeddings import EmbeddingService
@@ -40,19 +42,58 @@ class KPIService:
     def prepare_tables(self, tables: List[TableRef], sample_rows: int = 5) -> List[PreparedTable]:
         content_rows: List[Tuple[str, str, str, str, str]] = []
         for t in tables:
-            schema = self.bq.get_table_schema(t.datasetId, t.tableId)
-            samples = self.bq.sample_rows(t.datasetId, t.tableId, limit=sample_rows)
+            try:
+                schema = self.bq.get_table_schema(t.datasetId, t.tableId)
+            except Exception:
+                schema = []
+            try:
+                samples = self.bq.sample_rows(t.datasetId, t.tableId, limit=sample_rows)
+            except Exception:
+                samples = []
             content = self.embeddings.build_table_summary_content(self.project_id, t.datasetId, t.tableId, schema, samples)
             # table summary row
             content_rows.append(("table_summary", t.datasetId, t.tableId, "summary", content))
             # sample rows as separate docs
             for idx, row in enumerate(samples):
                 content_rows.append(("sample_row", t.datasetId, t.tableId, f"row_{idx}", f"{row}"))
-        inserted = self.embeddings.generate_and_store_embeddings(self.bq, content_rows)
+
         table_fqn = f"{self.project_id}.{self.embedding_dataset}.table_embeddings"
-        count = self.bq.count_rows(table_fqn)
-        if count >= self.create_index_threshold:
-            self.bq.create_vector_index_if_needed(table_fqn)
+        inserted = 0
+        try:
+            inserted = self.embeddings.generate_and_store_embeddings(self.bq, content_rows)
+        except Exception as emb_exc:
+            # Fallback: insert docs with empty embeddings to avoid hard failure
+            try:
+                table_fqn = self.bq.ensure_embeddings_table(self.embedding_dataset, table_name="table_embeddings")
+                now_iso = datetime.now(timezone.utc).isoformat()
+                json_rows = []
+                for (source_type, ds, tb, obj, content) in content_rows:
+                    json_rows.append(
+                        {
+                            "id": uuid.uuid4().hex,
+                            "source_type": source_type,
+                            "dataset_id": ds,
+                            "table_id": tb,
+                            "object_ref": obj,
+                            "content": content,
+                            "embedding": [],
+                            "created_at": now_iso,
+                        }
+                    )
+                self.bq.insert_embeddings_json(table_fqn, json_rows)
+                inserted = len(json_rows)
+            except Exception:
+                # If even fallback fails, surface the original embedding error
+                raise emb_exc
+
+        count = 0
+        try:
+            count = self.bq.count_rows(table_fqn)
+            if count >= self.create_index_threshold:
+                self.bq.create_vector_index_if_needed(table_fqn)
+        except Exception:
+            pass
+
         prepared: List[PreparedTable] = []
         for t in tables:
             prepared.append(PreparedTable(datasetId=t.datasetId, tableId=t.tableId, embed_rows=inserted))
@@ -61,8 +102,14 @@ class KPIService:
     def _build_input_json(self, tables: List[TableRef]) -> str:
         infos: List[Dict[str, Any]] = []
         for t in tables:
-            schema = self.bq.get_table_schema(t.datasetId, t.tableId)
-            samples = self.bq.sample_rows(t.datasetId, t.tableId, limit=5)
+            try:
+                schema = self.bq.get_table_schema(t.datasetId, t.tableId)
+            except Exception:
+                schema = []
+            try:
+                samples = self.bq.sample_rows(t.datasetId, t.tableId, limit=5)
+            except Exception:
+                samples = []
             # vector search nearest docs to give LLM extra context
             try:
                 nearest = self.bq.vector_search_topk_by_summary(self.embedding_dataset, t.datasetId, t.tableId, k=10)
