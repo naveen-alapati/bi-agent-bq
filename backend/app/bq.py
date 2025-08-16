@@ -12,14 +12,14 @@ class BigQueryService:
         self.client = bigquery.Client(project=project_id, location=location)
 
     def list_datasets(self) -> List[Dict[str, Any]]:
+        # Avoid get_dataset calls to minimize permissions; show ids only
         datasets = []
-        for ds in self.client.list_datasets():
-            meta = self.client.get_dataset(ds)
+        for ds in self.client.list_datasets(project=self.project_id):
             datasets.append(
                 {
-                    "datasetId": meta.dataset_id,
-                    "friendlyName": getattr(meta, "friendly_name", None),
-                    "description": getattr(meta, "description", None),
+                    "datasetId": ds.dataset_id,
+                    "friendlyName": None,
+                    "description": None,
                 }
             )
         return datasets
@@ -27,14 +27,14 @@ class BigQueryService:
     def list_tables(self, dataset_id: str) -> List[Dict[str, Any]]:
         tables_info: List[Dict[str, Any]] = []
         dataset_ref = bigquery.DatasetReference(self.project_id, dataset_id)
+        # Avoid get_table to reduce needed permissions; return ids only
         for tbl_item in self.client.list_tables(dataset_ref):
-            table = self.client.get_table(tbl_item)
             tables_info.append(
                 {
-                    "tableId": table.table_id,
-                    "rowCount": table.num_rows,
-                    "created": table.created.isoformat() if table.created else None,
-                    "lastModified": table.modified.isoformat() if table.modified else None,
+                    "tableId": tbl_item.table_id,
+                    "rowCount": None,
+                    "created": None,
+                    "lastModified": None,
                 }
             )
         return tables_info
