@@ -3,16 +3,45 @@ from google.cloud import bigquery
 from google.api_core.exceptions import NotFound, Conflict
 import json
 import os
+import re
 
 
 class BigQueryService:
     def __init__(self, project_id: Optional[str], location: str = "US") -> None:
         self.project_id = project_id
         self.location = os.getenv("BQ_LOCATION", location)
-        self.client = bigquery.Client(project=project_id, location=self.location)
+        self.client = bigquery.Client(project=project_id)
+        self._dataset_location_cache: Dict[str, str] = {}
+
+    def _get_dataset_location(self, dataset_id: str) -> Optional[str]:
+        if not dataset_id:
+            return None
+        if dataset_id in self._dataset_location_cache:
+            return self._dataset_location_cache[dataset_id]
+        try:
+            ds = self.client.get_dataset(f"{self.project_id}.{dataset_id}")
+            loc = getattr(ds, "location", None) or self.location
+            self._dataset_location_cache[dataset_id] = loc
+            return loc
+        except Exception:
+            return None
+
+    def _infer_location_from_sql(self, sql: str) -> Optional[str]:
+        # Look for backticked fully-qualified table refs: `project.dataset.table`
+        m = re.search(r"`([\w-]+)\.([\w$-]+)\.([\w$-]+)`", sql)
+        if m:
+            proj, ds, _ = m.groups()
+            if proj == self.project_id:
+                return self._get_dataset_location(ds)
+        # Fallback: unquoted pattern project.dataset.table (very approximate)
+        m2 = re.search(r"\b([\w-]+)\.([\w$-]+)\.([\w$-]+)\b", sql)
+        if m2:
+            proj, ds, _ = m2.groups()
+            if proj == self.project_id:
+                return self._get_dataset_location(ds)
+        return None
 
     def list_datasets(self) -> List[Dict[str, Any]]:
-        # Avoid get_dataset calls to minimize permissions; show ids only
         datasets = []
         for ds in self.client.list_datasets(project=self.project_id):
             datasets.append(
@@ -27,7 +56,6 @@ class BigQueryService:
     def list_tables(self, dataset_id: str) -> List[Dict[str, Any]]:
         tables_info: List[Dict[str, Any]] = []
         dataset_ref = bigquery.DatasetReference(self.project_id, dataset_id)
-        # Avoid get_table to reduce needed permissions; return ids only
         for tbl_item in self.client.list_tables(dataset_ref):
             tables_info.append(
                 {
@@ -49,17 +77,17 @@ class BigQueryService:
         LIMIT {int(limit)}
         """
         job_config = bigquery.QueryJobConfig()
-        job_config.location = self.location
+        job_config.location = self._get_dataset_location(dataset_id) or self.location
         query_job = self.client.query(sql, job_config=job_config)
         rows = [dict(row) for row in query_job]
         return rows
 
     def query_rows(self, sql: str) -> List[Dict[str, Any]]:
         job_config = bigquery.QueryJobConfig()
-        job_config.location = self.location
+        inferred = self._infer_location_from_sql(sql)
+        job_config.location = inferred or self.location
         query_job = self.client.query(sql, job_config=job_config)
         results = [dict(row) for row in query_job]
-        # Ensure JSON serializable: convert bytes to str etc
         normalized: List[Dict[str, Any]] = []
         for row in results:
             out: Dict[str, Any] = {}
@@ -110,7 +138,6 @@ class BigQueryService:
         return int(res[0]["c"]) if res else 0
 
     def create_vector_index_if_needed(self, table_fqn: str, index_name: str = "idx_table_embeddings") -> Optional[str]:
-        # Best-effort create. Some locations may not yet support VECTOR INDEX metadata listing via INFORMATION_SCHEMA.
         create_sql = f"""
         CREATE VECTOR INDEX `{index_name}`
         ON `{table_fqn}` (embedding)
@@ -122,21 +149,16 @@ class BigQueryService:
         except Conflict:
             return index_name
         except Exception:
-            # Ignore if not supported or already exists
             return None
 
     def run_embedding_insert_with_bqml(self, embedding_model_fqn: str, target_table_fqn: str, content_rows: List[Tuple[str, str, str, str]]) -> int:
-        # content_rows: List of tuples (source_type, dataset_id, table_id, object_ref, content)
-        # Build a VALUES clause via SELECT ... UNION ALL pattern
         if not content_rows:
             return 0
-
         selects: List[str] = []
         for idx, (source_type, dataset_id, table_id, object_ref) in enumerate(
             [(r[0], r[1], r[2], r[3]) for r in content_rows]
         ):
             content = content_rows[idx][4]
-            # Escape single quotes
             esc_content = content.replace("'", "''")
             esc_source = source_type.replace("'", "''")
             esc_dataset = dataset_id.replace("'", "''")
@@ -146,7 +168,6 @@ class BigQueryService:
                 f"SELECT '{esc_source}' AS source_type, '{esc_dataset}' AS dataset_id, '{esc_table}' AS table_id, '{esc_obj}' AS object_ref, '{esc_content}' AS content"
             )
         union_sql = " UNION ALL \n".join(selects)
-
         sql = f"""
         INSERT INTO `{target_table_fqn}` (id, source_type, dataset_id, table_id, object_ref, content, embedding, created_at)
         SELECT
@@ -190,7 +211,7 @@ class BigQueryService:
                 bigquery.ScalarQueryParameter("tb", "STRING", table_id),
                 bigquery.ScalarQueryParameter("k", "INT64", int(k)),
             ],
-            location=self.location,
+            location=self._get_dataset_location(embeddings_dataset) or self.location,
         )
         results = self.client.query(sql, job_config=job_config).result()
         return [
@@ -216,7 +237,7 @@ class BigQueryService:
                 bigquery.ScalarQueryParameter("tb", "STRING", table_id),
                 bigquery.ScalarQueryParameter("k", "INT64", int(k)),
             ],
-            location=self.location,
+            location=self._get_dataset_location(embeddings_dataset) or self.location,
         )
         results = self.client.query(sql, job_config=job_config).result()
         return [
