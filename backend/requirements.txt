@@ -6,3 +6,4 @@ google-cloud-aiplatform==1.66.0
 vertexai==1.66.0
 openai==1.37.0
 python-dotenv==1.0.1
+requests==2.32.4

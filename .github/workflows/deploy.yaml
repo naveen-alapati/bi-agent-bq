@@ -57,5 +57,4 @@ jobs:
             --region ${{ secrets.GCP_REGION }} \
             --allow-unauthenticated \
             --quiet \
-            --set-env-vars PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},BQ_LOCATION=${{ secrets.GCP_REGION }},BQ_EMBEDDINGS_DATASET=analytics_poc,LLM_PROVIDER=gemini,GEMINI_MODEL=gemini-2.0-flash \
-            --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest
+            --set-env-vars PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},BQ_LOCATION=${{ secrets.GCP_REGION }},BQ_EMBEDDINGS_DATASET=analytics_poc,LLM_PROVIDER=gemini,GEMINI_MODEL=gemini-2.0-flash,GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
