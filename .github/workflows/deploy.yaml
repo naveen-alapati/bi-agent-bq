@@ -22,8 +22,13 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
+      - name: Ensure Artifact Registry repo
+        run: |
+          gcloud artifacts repositories describe analytics --location=us || \
+          gcloud artifacts repositories create analytics --repository-format=docker --location=us
+
       - name: Configure Docker auth
-        run: gcloud auth configure-docker gcr.io --quiet
+        run: gcloud auth configure-docker us-docker.pkg.dev --quiet
 
       - name: Build frontend
         run: |
@@ -33,7 +38,7 @@ jobs:
 
       - name: Build and push image
         run: |
-          IMAGE=gcr.io/${{ secrets.GCP_PROJECT_ID }}/analytics-kpi-poc:${{ github.sha }}
+          IMAGE=us-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/analytics/analytics-kpi-poc:${{ github.sha }}
           docker build -t $IMAGE -f backend/Dockerfile .
           docker push $IMAGE
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
