@@ -52,5 +52,13 @@ export const api = {
   async getDefaultDashboard() {
     const r = await axios.get('/api/dashboards/default')
     return r.data.id as string | null
+  },
+  async cxoStart(dashboard_id: string, dashboard_name: string, active_tab: string) {
+    const r = await axios.post('/api/cxo/start', { dashboard_id, dashboard_name, active_tab })
+    return r.data.conversation_id as string
+  },
+  async cxoSend(conversation_id: string, message: string, context: any) {
+    const r = await axios.post('/api/cxo/send', { conversation_id, message, context })
+    return r.data.reply as string
   }
 }
