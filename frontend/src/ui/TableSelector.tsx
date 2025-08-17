@@ -13,14 +13,12 @@ export function TableSelector({ datasets, onChange }: Props) {
   const [loadingTables, setLoadingTables] = useState(false)
   const [error, setError] = useState<string>('')
 
-  // pick first dataset by default when list becomes available
   useEffect(() => {
     if (datasets.length && !activeDataset) {
       setActiveDataset(datasets[0].datasetId)
     }
   }, [datasets])
 
-  // load tables for active dataset on change
   useEffect(() => {
     async function loadTables(dsId: string) {
       if (!dsId) return
@@ -39,7 +37,6 @@ export function TableSelector({ datasets, onChange }: Props) {
     loadTables(activeDataset)
   }, [activeDataset])
 
-  // emit selection whenever selectedByDataset changes
   useEffect(() => {
     const out: {datasetId: string, tableId: string}[] = []
     for (const dsId of Object.keys(selectedByDataset)) {
@@ -74,11 +71,11 @@ export function TableSelector({ datasets, onChange }: Props) {
   return (
     <div>
       <div style={{ marginBottom: 8 }}>
-        <label style={{ display: 'block', marginBottom: 4 }}>Dataset</label>
+        <div className="section-title">Dataset</div>
         <select
+          className="select"
           value={activeDataset}
           onChange={e => setActiveDataset(e.target.value)}
-          style={{ width: '100%' }}
           disabled={!datasets.length}
         >
           {datasets.map(ds => (
@@ -87,26 +84,28 @@ export function TableSelector({ datasets, onChange }: Props) {
         </select>
       </div>
 
-      {error && <div style={{ color: 'crimson', marginBottom: 8 }}>{error}</div>}
+      {error && <div className="badge" style={{ marginBottom: 8, borderColor: 'crimson', color: 'crimson', background: 'rgba(220,20,60,0.06)' }}>{error}</div>}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-        <div style={{ fontWeight: 600 }}>Tables</div>
-        <div>
-          <button onClick={selectAll} disabled={!activeTables.length || loadingTables} style={{ marginRight: 6 }}>Select All</button>
-          <button onClick={clearAll} disabled={!activeSelected.size}>Clear</button>
+        <div className="section-title" style={{ margin: 0 }}>Tables</div>
+        <div className="toolbar">
+          <button className="btn btn-sm" onClick={selectAll} disabled={!activeTables.length || loadingTables}>Select All</button>
+          <button className="btn btn-sm" onClick={clearAll} disabled={!activeSelected.size}>Clear</button>
         </div>
       </div>
 
-      <div style={{ maxHeight: 320, overflow: 'auto', border: '1px solid #eee', padding: 8 }}>
+      <div className="scroll">
         {loadingTables && <div>Loading tables...</div>}
         {!loadingTables && activeTables.length === 0 && <div>No tables found for this dataset.</div>}
         {!loadingTables && activeTables.map(t => (
-          <label key={t.tableId} style={{ display: 'block' }}>
+          <label key={t.tableId} className="list-item" style={{ gap: 8 }}>
             <input
               type="checkbox"
               checked={activeSelected.has(t.tableId)}
               onChange={() => toggle(t.tableId)}
-            /> {t.tableId}
+            />
+            <span style={{ flex: 1 }}>{t.tableId}</span>
+            {activeSelected.has(t.tableId) && <span className="tag">selected</span>}
           </label>
         ))}
       </div>

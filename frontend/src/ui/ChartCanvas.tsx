@@ -45,7 +45,7 @@ export function ChartCanvas({ chart, rows }: Props) {
       const line = d3.line<any>().x(r => (x(parse(r.x)) as number)).y(r => y(+r.y))
       svg.append('g').attr('transform', `translate(0,${height-30})`).call(d3.axisBottom(x as any))
       svg.append('g').attr('transform', 'translate(40,0)').call(d3.axisLeft(y))
-      svg.append('path').datum(rows).attr('fill','none').attr('stroke','#3b82f6').attr('stroke-width',2).attr('d', line)
+      svg.append('path').datum(rows).attr('fill','none').attr('stroke','#239BA7').attr('stroke-width',2).attr('d', line)
     } else if (chart.expected_schema?.startsWith('categorical') || chart.expected_schema?.startsWith('distribution')) {
       const labels = rows.map(r => r.label)
       const x = d3.scaleBand().domain(labels).range([40,  width-10]).padding(0.2)
@@ -61,7 +61,7 @@ export function ChartCanvas({ chart, rows }: Props) {
         .attr('y', d => y(+d.value))
         .attr('width', d => x.bandwidth())
         .attr('height', d => (height-30) - y(+d.value))
-        .attr('fill', '#10b981')
+        .attr('fill', '#7ADAA5')
     } else if (chart.chart_type === 'scatter') {
       const x = d3.scaleLinear().domain([0, d3.max(rows, r => +r.x) || 0]).nice().range([40, width-10])
       const y = d3.scaleLinear().domain([0, d3.max(rows, r => +r.y) || 0]).nice().range([height-30, 10])
@@ -71,7 +71,7 @@ export function ChartCanvas({ chart, rows }: Props) {
         .attr('cx', d => x(+d.x))
         .attr('cy', d => y(+d.y))
         .attr('r', 3)
-        .attr('fill', '#ef4444')
+        .attr('fill', '#E1AA36')
     } else {
       svg.append('text').attr('x', 10).attr('y', 20).text('Unsupported chart type or schema')
     }
