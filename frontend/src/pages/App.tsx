@@ -32,6 +32,12 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true)
   const gridWrapRef = useRef<HTMLDivElement | null>(null)
   const [gridW, setGridW] = useState<number>(1000)
+  const [toasts, setToasts] = useState<{ id: number; type: 'success'|'error'; msg: string }[]>([])
+  const toast = (type: 'success'|'error', msg: string) => {
+    const id = Date.now() + Math.random()
+    setToasts(t => [...t, { id, type, msg }])
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4500)
+  }
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -118,7 +124,9 @@ export default function App() {
       const res = await api.saveDashboard(payload as any)
       setVersion(res.version)
       await api.listDashboards().then(setDashList)
-      alert(`Saved ${res.name} v${res.version}`)
+      toast('success', `Saved ${res.name} v${res.version}`)
+    } catch (e: any) {
+      toast('error', e?.message || 'Failed to save')
     } finally {
       setSaving(false)
     }
@@ -156,6 +164,9 @@ export default function App() {
 
   return (
     <div>
+      <div className="toast-container">
+        {toasts.map(t => (<div key={t.id} className={`toast ${t.type==='success'?'toast-success':'toast-error'}`}>{t.msg}</div>))}
+      </div>
       <TopBar
         name={dashboardName}
         version={version}
@@ -171,7 +182,7 @@ export default function App() {
         sidebarOpen={sidebarOpen}
       />
 
-      <div className="app-grid">
+      <div className={`app-grid ${!sidebarOpen ? 'app-grid--no-sidebar' : ''}`}>
         {sidebarOpen && (
           <div className="sidebar" style={{ display: 'grid', gap: 12 }}>
             <div className="panel">
@@ -223,17 +234,20 @@ export default function App() {
         <div style={{ display: 'grid', gap: 12 }} ref={gridWrapRef}>
           <div className="section-title">Dashboard
             {version && <span className="chip" style={{ marginLeft: 8 }}>v{version}</span>}
-            <button className="btn btn-sm" style={{ marginLeft: 'auto' }} onClick={async () => {
-              // mark this as default
-              const list = await api.listDashboards()
-              const current = list.find((d:any) => d.name === dashboardName && d.version === version)
-              if (current?.id) {
-                await api.setDefaultDashboard(current.id)
-                alert('Set as default dashboard')
-              } else {
-                alert('Save the dashboard first to set as default')
+            <button className="btn btn-sm" style={{ marginLeft: 'auto', background: '#239BA7', color: '#fff', borderColor: '#239BA7' }} onClick={async () => {
+              try {
+                const list = await api.listDashboards()
+                const current = list.find((d:any) => d.name === dashboardName && d.version === version)
+                if (current?.id) {
+                  await api.setDefaultDashboard(current.id)
+                  toast('success', 'Set as default dashboard')
+                } else {
+                  toast('error', 'Save the dashboard first to set as default')
+                }
+              } catch (e:any) {
+                toast('error', e?.message || 'Failed to set default')
               }
-            }}>Set as Default</button>
+            }}>Default</button>
           </div>
           <GridLayout
             className="layout"
