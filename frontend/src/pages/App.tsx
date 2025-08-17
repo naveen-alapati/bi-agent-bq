@@ -44,6 +44,8 @@ export default function App() {
   const [editingTabId, setEditingTabId] = useState<string | null>(null)
   const [editingTabName, setEditingTabName] = useState<string>('')
   const [dragTabId, setDragTabId] = useState<string | null>(null)
+  const tabColors = ['#239BA7', '#7ADAA5', '#E1AA36', '#5B8DEF', '#C084FC']
+  const colorForTab = (id: string, idx: number) => tabColors[idx % tabColors.length]
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -343,11 +345,11 @@ export default function App() {
             }}>Default</button>
           </div>
           <div className="toolbar" style={{ marginBottom: 8 }}>
-            {tabs.sort((a,b)=>a.order-b.order).map(t => (
+            {tabs.sort((a,b)=>a.order-b.order).map((t, idx) => (
               <button
                 key={t.id}
                 className="btn btn-sm"
-                style={{ background: t.id===activeTab? 'var(--primary)':'', color: t.id===activeTab? '#fff': undefined, borderColor: t.id===activeTab? 'var(--primary)':'' }}
+                style={{ background: t.id===activeTab? colorForTab(t.id, idx):'', color: t.id===activeTab? '#0b1220': undefined, borderColor: t.id===activeTab? colorForTab(t.id, idx):'' }}
                 onClick={() => setActiveTab(t.id)}
                 draggable
                 onDragStart={(e) => onDragStartTab(t.id, e)}
@@ -364,7 +366,7 @@ export default function App() {
                     onBlur={commitEditTab}
                     onKeyDown={e => { if (e.key === 'Enter') commitEditTab(); if (e.key === 'Escape') cancelEditTab() }}
                     onClick={e => e.stopPropagation()}
-                    style={{ maxWidth: 140 }}
+                    style={{ maxWidth: 120 }}
                   />
                 ) : (
                   <span>{t.name}</span>
