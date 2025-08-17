@@ -70,3 +70,38 @@ class RunKpiRequest(BaseModel):
 
 class RunKpiResponse(BaseModel):
     rows: List[Dict[str, Any]]
+
+
+# Dashboards
+class DashboardSaveRequest(BaseModel):
+    id: Optional[str] = None
+    name: str
+    kpis: List[KPIItem]
+    layout: List[Dict[str, Any]]
+    selected_tables: List[TableRef]
+
+
+class DashboardSaveResponse(BaseModel):
+    id: str
+    name: str
+
+
+class DashboardSummary(BaseModel):
+    id: str
+    name: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class DashboardListResponse(BaseModel):
+    dashboards: List[DashboardSummary]
+
+
+class DashboardGetResponse(BaseModel):
+    id: str
+    name: str
+    kpis: List[KPIItem]
+    layout: List[Dict[str, Any]]
+    selected_tables: List[TableRef]
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None

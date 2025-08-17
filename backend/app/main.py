@@ -10,15 +10,19 @@ from .bq import BigQueryService
 from .embeddings import EmbeddingMode, EmbeddingService
 from .kpi import KPIService
 from .models import (
-    DatasetResponse,
-    TableRef,
-    TableInfoResponse,
-    PrepareRequest,
-    PrepareResponse,
-    GenerateKpisRequest,
-    GenerateKpisResponse,
-    RunKpiRequest,
-    RunKpiResponse,
+	DatasetResponse,
+	TableRef,
+	TableInfoResponse,
+	PrepareRequest,
+	PrepareResponse,
+	GenerateKpisRequest,
+	GenerateKpisResponse,
+	RunKpiRequest,
+	RunKpiResponse,
+	DashboardSaveRequest,
+	DashboardSaveResponse,
+	DashboardListResponse,
+	DashboardGetResponse,
 )
 from .diagnostics import run_self_test
 
@@ -27,94 +31,132 @@ BQ_DATASET_EMBED = os.getenv("BQ_EMBEDDINGS_DATASET", "analytics_poc")
 BQ_LOCATION = os.getenv("BQ_LOCATION", "US")
 EMBEDDING_MODE = os.getenv("EMBEDDING_MODE", "bigquery")
 CREATE_INDEX_THRESHOLD = int(os.getenv("CREATE_INDEX_THRESHOLD", "5000"))
+DASH_DATASET = os.getenv("DASHBOARDS_DATASET", "analytics_dash")
 
 app = FastAPI(title="Analytics KPI POC")
 
 # CORS for local dev
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+	CORSMiddleware,
+	allow_origins=["*"],
+	allow_credentials=True,
+	allow_methods=["*"],
+	allow_headers=["*"],
 )
 
 bq_service = BigQueryService(project_id=PROJECT_ID, location=BQ_LOCATION)
 embedding_service = EmbeddingService(
-    mode=EmbeddingMode(EMBEDDING_MODE),
-    project_id=PROJECT_ID,
-    location=BQ_LOCATION,
-    bq_dataset=BQ_DATASET_EMBED,
+	mode=EmbeddingMode(EMBEDDING_MODE),
+	project_id=PROJECT_ID,
+	location=BQ_LOCATION,
+	bq_dataset=BQ_DATASET_EMBED,
 )
 kpi_service = KPIService(
-    bq=bq_service,
-    embeddings=embedding_service,
-    project_id=PROJECT_ID,
-    embedding_dataset=BQ_DATASET_EMBED,
-    create_index_threshold=CREATE_INDEX_THRESHOLD,
+	bq=bq_service,
+	embeddings=embedding_service,
+	project_id=PROJECT_ID,
+	embedding_dataset=BQ_DATASET_EMBED,
+	create_index_threshold=CREATE_INDEX_THRESHOLD,
 )
 
 
 @app.get("/api/health")
 def health() -> Dict[str, str]:
-    return {"status": "ok"}
+	return {"status": "ok"}
 
 
 @app.get("/api/datasets", response_model=DatasetResponse)
 def list_datasets():
-    try:
-        datasets = bq_service.list_datasets()
-        return {"datasets": datasets}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+	try:
+		datasets = bq_service.list_datasets()
+		return {"datasets": datasets}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/datasets/{dataset_id}/tables", response_model=TableInfoResponse)
 def list_tables(dataset_id: str):
-    try:
-        tables = bq_service.list_tables(dataset_id)
-        return {"dataset_id": dataset_id, "tables": tables}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+	try:
+		tables = bq_service.list_tables(dataset_id)
+		return {"dataset_id": dataset_id, "tables": tables}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/api/prepare", response_model=PrepareResponse)
 def prepare(req: PrepareRequest):
-    try:
-        result = kpi_service.prepare_tables(req.tables, sample_rows=req.sampleRows or 5)
-        return {"status": "ok", "prepared": result}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+	try:
+		result = kpi_service.prepare_tables(req.tables, sample_rows=req.sampleRows or 5)
+		return {"status": "ok", "prepared": result}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/api/generate_kpis", response_model=GenerateKpisResponse)
 def generate_kpis(req: GenerateKpisRequest):
-    try:
-        k = req.k or 5
-        kpis = kpi_service.generate_kpis(req.tables, k=k)
-        return {"kpis": kpis}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+	try:
+		k = req.k or 5
+		kpis = kpi_service.generate_kpis(req.tables, k=k)
+		return {"kpis": kpis}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/api/run_kpi", response_model=RunKpiResponse)
 def run_kpi(req: RunKpiRequest):
-    try:
-        rows = bq_service.query_rows(req.sql)
-        return {"rows": rows}
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+	try:
+		rows = bq_service.query_rows(req.sql)
+		return {"rows": rows}
+	except Exception as exc:
+		raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/selftest")
 def api_selftest(dataset: Optional[str] = None, limit_tables: int = 3, sample_rows: int = 3, k: int = 3, run_kpis_limit: int = 2, force_llm: bool = True):
-    try:
-        report = run_self_test(bq_service, kpi_service, dataset=dataset, limit_tables=limit_tables, sample_rows=sample_rows, kpis_k=k, run_kpis_limit=run_kpis_limit, force_llm=force_llm)
-        return report
-    except Exception as exc:
-        return {"error": str(exc)}
+	try:
+		report = run_self_test(bq_service, kpi_service, dataset=dataset, limit_tables=limit_tables, sample_rows=sample_rows, kpis_k=k, run_kpis_limit=run_kpis_limit, force_llm=force_llm)
+		return report
+	except Exception as exc:
+		return {"error": str(exc)}
+
+
+# Dashboard APIs
+@app.post("/api/dashboards", response_model=DashboardSaveResponse)
+def save_dashboard(req: DashboardSaveRequest):
+	try:
+		# serialize KPI Pydantic models to dicts
+		kpis = [k.model_dump() if hasattr(k, 'model_dump') else dict(k) for k in req.kpis]
+		layout = req.layout
+		selected = [s.model_dump() if hasattr(s, 'model_dump') else dict(s) for s in req.selected_tables]
+		new_id = bq_service.save_dashboard(name=req.name, kpis=kpis, layout=layout, selected_tables=selected, dashboard_id=req.id, dataset_id=DASH_DATASET)
+		return {"id": new_id, "name": req.name}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/dashboards", response_model=DashboardListResponse)
+def list_dashboards():
+	try:
+		rows = bq_service.list_dashboards(dataset_id=DASH_DATASET)
+		return {"dashboards": rows}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/dashboards/{dashboard_id}", response_model=DashboardGetResponse)
+def get_dashboard(dashboard_id: str):
+	try:
+		row = bq_service.get_dashboard(dashboard_id=dashboard_id, dataset_id=DASH_DATASET)
+		if not row:
+			raise HTTPException(status_code=404, detail="Dashboard not found")
+		return row
+	except HTTPException:
+		raise
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
 
 # Serve built SPA (Dockerfile copies frontend/dist to /app/static)
 static_dir = os.path.abspath(os.getenv("STATIC_DIR", "/app/static"))
 if os.path.isdir(static_dir):
-    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+	app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")

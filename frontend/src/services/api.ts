@@ -20,5 +20,17 @@ export const api = {
   async runKpi(sql: string) {
     const r = await axios.post('/api/run_kpi', { sql })
     return r.data.rows
+  },
+  async saveDashboard(payload: { id?: string, name: string, kpis: any[], layout: any[], selected_tables: any[] }) {
+    const r = await axios.post('/api/dashboards', payload)
+    return r.data
+  },
+  async listDashboards() {
+    const r = await axios.get('/api/dashboards')
+    return r.data.dashboards
+  },
+  async getDashboard(id: string) {
+    const r = await axios.get(`/api/dashboards/${encodeURIComponent(id)}`)
+    return r.data
   }
 }
