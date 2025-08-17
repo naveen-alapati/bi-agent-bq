@@ -131,18 +131,20 @@ class KPIService:
     def generate_kpis(self, tables: List[TableRef], k: int = 5) -> List[KPIItem]:
         all_items: List[KPIItem] = []
         for t in tables:
-            system_prompt = SYSTEM_PROMPT_TEMPLATE.format(k=k)
-            user_prompt = self._build_input_json([t])
             try:
+                system_prompt = SYSTEM_PROMPT_TEMPLATE.format(k=k)
+                user_prompt = self._build_input_json([t])
                 result = self.llm.generate_json(system_prompt, user_prompt)
             except Exception as exc:
                 if self.kpi_fallback_enabled:
                     all_items.extend(self._fallback_kpis_for_table(t.datasetId, t.tableId, k))
                     continue
-                raise
+                # Log and continue to next table instead of failing the whole request
+                print(f"KPI LLM error for {t.datasetId}.{t.tableId}: {exc}")
+                continue
             table_slug = f"{t.datasetId}.{t.tableId}"
             count = 0
-            for item in result.get("kpis", []):
+            for item in (result.get("kpis") or []):
                 if count >= k:
                     break
                 sql = item.get("sql", "")
@@ -162,9 +164,6 @@ class KPIService:
                     )
                 )
                 count += 1
-            if count == 0:
-                if self.kpi_fallback_enabled:
-                    all_items.extend(self._fallback_kpis_for_table(t.datasetId, t.tableId, k))
-                else:
-                    raise ValueError("LLM returned no valid KPIs")
+        if not all_items:
+            raise ValueError("No KPIs generated for the selected tables")
         return all_items
