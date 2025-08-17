@@ -178,16 +178,18 @@ export default function App() {
             width={1000}
             isResizable
             isDraggable
+            draggableHandle=".drag-handle"
+            draggableCancel=".no-drag, button, input, textarea, select"
             onLayoutChange={onLayoutChange}
           >
             {kpis.map(k => (
               <div key={k.id} data-grid={layouts.find(l => l.i === k.id)} style={{ border: '1px solid #ddd', background: '#fff', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ padding: 8, display: 'flex', justifyContent: 'space-between', cursor: 'move' }}>
-                  <div>
+                <div style={{ padding: 8, display: 'flex', justifyContent: 'space-between' }}>
+                  <div className="drag-handle">
                     <div style={{ fontWeight: 600 }}>{k.name}</div>
                     <div style={{ color: '#666', fontSize: 12 }}>{k.short_description}</div>
                   </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
+                  <div style={{ display: 'flex', gap: 6 }} className="no-drag">
                     <button onClick={() => runKpi(k)} style={{ fontSize: 12 }}>Run</button>
                     <button onClick={() => window.alert(k.sql)} style={{ fontSize: 12 }}>View SQL</button>
                     <button onClick={async () => {
@@ -209,7 +211,7 @@ export default function App() {
                     }} style={{ fontSize: 12 }}>Export</button>
                   </div>
                 </div>
-                <div style={{ flex: 1, padding: 8 }}>
+                <div style={{ flex: 1, padding: 8 }} className="no-drag">
                   <ChartRenderer chart={k} rows={rowsByKpi[k.id] || []} onSelect={(p) => setCrossFilter(p)} />
                 </div>
               </div>
