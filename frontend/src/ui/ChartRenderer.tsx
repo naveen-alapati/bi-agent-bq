@@ -10,10 +10,10 @@ export function ChartRenderer({ chart, rows, onSelect }: { chart: any, rows: any
       const spec: VisualizationSpec = {
         ...(chart.vega_lite_spec as any),
         data: { values: rows || [] },
+        autosize: { type: 'fit', contains: 'padding' },
       }
-      embed(vegaRef.current, spec, { actions: false }).then((res) => {
+      embed(vegaRef.current, spec, { actions: false, renderer: 'canvas' }).then((res) => {
         const view = res.view
-        // Basic click signal wiring
         view.addEventListener('click', (_evt: any, item: any) => {
           if (!item || !item.datum) return
           onSelect && onSelect({ datum: item.datum, chart })
@@ -23,7 +23,7 @@ export function ChartRenderer({ chart, rows, onSelect }: { chart: any, rows: any
   }, [chart, rows])
 
   if (chart.engine === 'vega-lite' && chart.vega_lite_spec) {
-    return <div ref={vegaRef} style={{ width: '100%', height: '100%' }} />
+    return <div ref={vegaRef} className="no-drag" style={{ width: '100%', height: '100%', display: 'flex' }} />
   }
 
   return <ChartCanvas chart={chart} rows={rows} />
