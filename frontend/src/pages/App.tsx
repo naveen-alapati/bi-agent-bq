@@ -131,7 +131,7 @@ export default function App() {
   useEffect(() => {
     const defaultLayout = kpis.map((k, i) => ({ i: k.id, x: (i % 2) * 6, y: Math.floor(i / 2) * 8, w: 6, h: 8 }))
     setLayouts(defaultLayout)
-    setTabLayouts(prev => ({ ...prev, [activeTab]: def }))
+    setTabLayouts(prev => ({ ...prev, [activeTab]: defaultLayout }))
   }, [kpis])
 
   function onLayoutChange(newLayout: Layout[]) {
