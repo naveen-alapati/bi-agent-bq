@@ -53,7 +53,7 @@ export default function Home() {
         </div>
         <div className="toolbar">
           <a className="btn" href="/editor">New Dashboard</a>
-          {active && <a className="btn btn-primary" href={`/editor`}>Edit Dashboard</a>}
+          {active && <a className="btn btn-primary" href={`/editor/${active.id}`}>Edit Dashboard</a>}
         </div>
       </div>
 
@@ -63,13 +63,13 @@ export default function Home() {
             <div className="section-title">All Dashboards</div>
             <div className="scroll">
               {dashboards.map(d => (
-                <div key={d.id} className="list-item" onClick={() => loadDashboard(d.id)} style={{ cursor: 'pointer' }}>
-                  <div>
+                <button key={d.id} className="btn" onClick={() => loadDashboard(d.id)} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, background: 'linear-gradient(90deg, var(--surface), rgba(122,218,165,0.2))' }}>
+                  <span style={{ textAlign: 'left' }}>
                     <div className="card-title">{d.name}</div>
                     <div className="card-subtitle">v{d.version}</div>
-                  </div>
-                  <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); loadDashboard(d.id) }}>Open</button>
-                </div>
+                  </span>
+                  <span className="chip">View</span>
+                </button>
               ))}
             </div>
           </div>
