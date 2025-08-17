@@ -485,3 +485,77 @@ class BigQueryService:
             row['vega_lite_spec'] = json.loads(row['vega_lite_spec']) if row.get('vega_lite_spec') else None
             out.append(row)
         return out
+
+    def ensure_cxo_tables(self, dataset_id: str = "analytics_cxo") -> Tuple[str, str]:
+        self.ensure_dataset(dataset_id)
+        conv_fqn = f"{self.project_id}.{dataset_id}.cxo_conversations"
+        msg_fqn = f"{self.project_id}.{dataset_id}.cxo_messages"
+        # conversations table
+        try:
+            self.client.get_table(conv_fqn)
+        except NotFound:
+            conv_schema = [
+                bigquery.SchemaField("id", "STRING"),
+                bigquery.SchemaField("dashboard_id", "STRING"),
+                bigquery.SchemaField("dashboard_name", "STRING"),
+                bigquery.SchemaField("active_tab", "STRING"),
+                bigquery.SchemaField("cxo_name", "STRING"),
+                bigquery.SchemaField("cxo_title", "STRING"),
+                bigquery.SchemaField("created_at", "TIMESTAMP"),
+                bigquery.SchemaField("updated_at", "TIMESTAMP"),
+            ]
+            self.client.create_table(bigquery.Table(conv_fqn, schema=conv_schema))
+        # messages table
+        try:
+            self.client.get_table(msg_fqn)
+        except NotFound:
+            msg_schema = [
+                bigquery.SchemaField("id", "STRING"),
+                bigquery.SchemaField("conversation_id", "STRING"),
+                bigquery.SchemaField("role", "STRING"),
+                bigquery.SchemaField("content", "STRING"),
+                bigquery.SchemaField("embedding", "FLOAT64", mode="REPEATED"),
+                bigquery.SchemaField("created_at", "TIMESTAMP"),
+            ]
+            self.client.create_table(bigquery.Table(msg_fqn, schema=msg_schema))
+        return conv_fqn, msg_fqn
+
+    def create_cxo_conversation(self, dashboard_id: str, dashboard_name: str, active_tab: str, cxo_name: str, cxo_title: str, dataset_id: str = "analytics_cxo") -> str:
+        conv_fqn, _ = self.ensure_cxo_tables(dataset_id)
+        from datetime import datetime, timezone
+        import uuid
+        conv_id = uuid.uuid4().hex
+        now = datetime.now(timezone.utc).isoformat()
+        row = {
+            "id": conv_id,
+            "dashboard_id": dashboard_id,
+            "dashboard_name": dashboard_name,
+            "active_tab": active_tab,
+            "cxo_name": cxo_name,
+            "cxo_title": cxo_title,
+            "created_at": now,
+            "updated_at": now,
+        }
+        errors = self.client.insert_rows_json(conv_fqn, [row])
+        if errors:
+            raise RuntimeError(f"Failed to create conversation: {errors}")
+        return conv_id
+
+    def add_cxo_message(self, conversation_id: str, role: str, content: str, embedding: Optional[List[float]] = None, dataset_id: str = "analytics_cxo") -> str:
+        _, msg_fqn = self.ensure_cxo_tables(dataset_id)
+        from datetime import datetime, timezone
+        import uuid
+        msg_id = uuid.uuid4().hex
+        now = datetime.now(timezone.utc).isoformat()
+        row = {
+            "id": msg_id,
+            "conversation_id": conversation_id,
+            "role": role,
+            "content": content,
+            "embedding": embedding or [],
+            "created_at": now,
+        }
+        errors = self.client.insert_rows_json(msg_fqn, [row])
+        if errors:
+            raise RuntimeError(f"Failed to insert message: {errors}")
+        return msg_id

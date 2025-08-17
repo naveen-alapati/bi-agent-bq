@@ -356,6 +356,50 @@ def kpi_catalog_list(datasetId: Optional[str] = None, tableId: Optional[str] = N
 		raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.post("/api/cxo/start")
+def cxo_start(payload: Dict[str, Any]):
+	try:
+		dashboard_id = payload.get('dashboard_id') or ''
+		dashboard_name = payload.get('dashboard_name') or ''
+		active_tab = payload.get('active_tab') or 'overview'
+		conv_id = bq_service.create_cxo_conversation(dashboard_id, dashboard_name, active_tab, cxo_name="Naveen Alapati", cxo_title="CEO")
+		return {"conversation_id": conv_id}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/cxo/send")
+def cxo_send(payload: Dict[str, Any]):
+	try:
+		conversation_id = payload.get('conversation_id')
+		message = payload.get('message') or ''
+		context = payload.get('context') or {}
+		if not conversation_id:
+			raise HTTPException(status_code=400, detail="conversation_id required")
+		# store user message
+		bq_service.add_cxo_message(conversation_id, role="user", content=message)
+		# build prompt from context (KPIs data summaries) and user message
+		kpis = context.get('kpis') or []
+		active_tab = context.get('active_tab') or 'overview'
+		dashboard_name = context.get('dashboard_name') or ''
+		sys = (
+			"You are CXO AI Assist for a CEO named Naveen Alapati. "
+			"Act as an all-round strategist. Be concise, executive, and action-oriented. "
+			"Leverage the provided dashboard KPIs for the active tab."
+		)
+		data = {"dashboard": dashboard_name, "active_tab": active_tab, "kpis": kpis, "question": message}
+		resp = llm_client.generate_json(sys, json.dumps(data))
+		bot_text = resp.get('text') if isinstance(resp, dict) else json.dumps(resp)
+		if not bot_text:
+			# fall back to raw JSON for v1
+			bot_text = json.dumps(resp)
+		bq_service.add_cxo_message(conversation_id, role="assistant", content=bot_text)
+		return {"reply": bot_text}
+	except HTTPException:
+		raise
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
 # Serve built SPA (Dockerfile copies frontend/dist to /app/static)
 static_dir = os.path.abspath(os.getenv("STATIC_DIR", "/app/static"))
 assets_dir = os.path.join(static_dir, "assets")

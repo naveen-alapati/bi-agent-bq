@@ -21,6 +21,11 @@ export default function Home() {
   const [gridW, setGridW] = useState<number>(1000)
   const [tabs, setTabs] = useState<{ id: string; name: string; order: number }[]>([{ id: 'overview', name: 'Overview', order: 0 }])
   const [activeTab, setActiveTab] = useState<string>('overview')
+  const [cxoOpen, setCxoOpen] = useState<boolean>(false)
+  const [cxoMin, setCxoMin] = useState<boolean>(false)
+  const [convId, setConvId] = useState<string>('')
+  const [chat, setChat] = useState<{ role: 'assistant'|'user'; text: string }[]>([])
+  const [input, setInput] = useState('')
 
   useEffect(() => { api.listDashboards().then((rows) => {
     // dedupe by name, keep latest updated_at
@@ -81,6 +86,31 @@ export default function Home() {
     toast('success', 'Dashboard refreshed')
   }
 
+  async function openCxo() {
+    if (!active) return
+    if (!convId) {
+      const id = await api.cxoStart(active.id, active.name, activeTab)
+      setConvId(id)
+      const welcome = `Hello Naveen Alapati (CEO). I am your CXO AI Assist. I have your dashboard “${active.name}” (tab: ${activeTab}) loaded. How can I help today?`
+      setChat([{ role: 'assistant', text: welcome }])
+    }
+    setCxoOpen(true); setCxoMin(false)
+  }
+
+  async function sendCxo() {
+    if (!convId || !input.trim() || !active) return
+    const msg = input.trim()
+    setChat(prev => [...prev, { role: 'user', text: msg }])
+    setInput('')
+    const context = {
+      dashboard_name: active.name,
+      active_tab: activeTab,
+      kpis: (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview')).map((k:any) => ({ id: k.id, name: k.name, sql: k.sql, expected_schema: k.expected_schema }))
+    }
+    const reply = await api.cxoSend(convId, msg, context)
+    setChat(prev => [...prev, { role: 'assistant', text: reply }])
+  }
+
   const layout: Layout[] = useMemo(() => {
     if (!active) return []
     const tl = (active.tab_layouts || {})
@@ -104,10 +134,41 @@ export default function Home() {
           {active && <span className="badge">{active.name} v{active.version}</span>}
         </div>
         <div className="toolbar">
+          <button className="btn btn-accent" onClick={openCxo}>CXO AI Assist</button>
           <a className="btn" href="/editor">New Dashboard</a>
           {active && <a className="btn btn-primary" href={`/editor/${active.id}`}>Edit Dashboard</a>}
         </div>
       </div>
+
+      {/* Floating Chat */}
+      {cxoOpen && (
+        <div style={{ position: 'fixed', right: 16, bottom: 16, width: cxoMin ? 280 : 420, height: cxoMin ? 54 : '70vh', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)', display: 'flex', flexDirection: 'column', zIndex: 9998 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 8, borderBottom: '1px solid var(--border)' }}>
+            <div className="card-title">CXO AI Assist</div>
+            <div className="toolbar">
+              <button className="btn btn-sm" onClick={() => setCxoMin(m => !m)}>{cxoMin ? '▣' : '–'}</button>
+              <button className="btn btn-sm" onClick={() => setCxoOpen(false)}>✕</button>
+            </div>
+          </div>
+          {!cxoMin && (
+            <>
+              <div style={{ flex: 1, overflow: 'auto', padding: 8 }}>
+                {chat.map((m, i) => (
+                  <div key={i} style={{ marginBottom: 10, textAlign: m.role==='user' ? 'right':'left' }}>
+                    <div style={{ display: 'inline-block', padding: '8px 12px', borderRadius: 12, background: m.role==='user' ? 'var(--primary)' : 'var(--surface)', color: m.role==='user' ? '#fff' : 'var(--fg)' }}>
+                      {m.text}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding: 8, borderTop: '1px solid var(--border)', display: 'flex', gap: 6 }}>
+                <input className="input" placeholder="Ask anything..." value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key==='Enter') sendCxo() }} style={{ flex: 1 }} />
+                <button className="btn btn-primary" onClick={sendCxo}>Send</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       <div className={`app-grid ${!sidebarOpen ? 'app-grid--collapsed' : ''}`}>
         {(
@@ -134,6 +195,7 @@ export default function Home() {
           {active && (
             <>
               <div className="panel" style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+                {/* local filters */}
                 <div>
                   <label style={{ fontSize: 12, color: 'var(--muted)', display: 'block' }}>Date</label>
                   <div>
@@ -149,7 +211,19 @@ export default function Home() {
                     <input className="input" placeholder="value" value={localFilters.category?.value || ''} onChange={e => setLocalFilters(f => ({ ...f, category: { ...(f.category||{}), value: e.target.value } }))} />
                   </div>
                 </div>
-                <button className="btn btn-primary" onClick={() => refreshAll()}>Refresh</button>
+                <div className="toolbar" style={{ marginLeft: 'auto' }}>
+                  <button className="btn" onClick={() => refreshAll()}>Refresh</button>
+                  <button className="btn" onClick={async () => {
+                    const kpis = visibleKpis
+                    const r = await fetch('/api/export/dashboard', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kpis }) });
+                    const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${active.name || 'dashboard'}-${activeTab}.zip`; a.click(); URL.revokeObjectURL(url)
+                  }}>Export Current Tab</button>
+                  <button className="btn" onClick={async () => {
+                    const kpis = active.kpis || []
+                    const r = await fetch('/api/export/dashboard', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kpis }) });
+                    const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${active.name || 'dashboard'}.zip`; a.click(); URL.revokeObjectURL(url)
+                  }}>Export All</button>
+                </div>
               </div>
 
               <div className="toolbar" style={{ gap: 6 }}>
@@ -158,15 +232,7 @@ export default function Home() {
                 ))}
               </div>
 
-              <GridLayout
-                className="layout"
-                layout={layout}
-                cols={12}
-                rowHeight={30}
-                width={gridW}
-                isResizable={false}
-                isDraggable={false}
-              >
+              <GridLayout className="layout" layout={layout} cols={12} rowHeight={30} width={gridW} isResizable={false} isDraggable={false}>
                 {visibleKpis.map((k: any) => (
                   <div key={k.id} data-grid={layout.find(l => l.i === k.id)} className="card" style={{ display: 'flex', flexDirection: 'column' }}>
                     <div className="card-header">
