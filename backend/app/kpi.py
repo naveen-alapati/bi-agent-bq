@@ -178,5 +178,6 @@ class KPIService:
                 )
                 count += 1
         if not all_items:
-            raise ValueError("No KPIs generated for the selected tables")
+            # Return empty list rather than raising, to avoid 500 and let UI handle gracefully
+            return []
         return all_items
