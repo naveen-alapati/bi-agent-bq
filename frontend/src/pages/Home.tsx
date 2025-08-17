@@ -11,12 +11,17 @@ export default function Home() {
   const [rowsByKpi, setRowsByKpi] = useState<Record<string, any[]>>({})
   const [localFilters, setLocalFilters] = useState<{ from?: string; to?: string; category?: { column?: string; value?: string } }>({})
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true)
+  const [toasts, setToasts] = useState<{ id: number; type: 'success'|'error'; msg: string }[]>([])
+  const toast = (type: 'success'|'error', msg: string) => {
+    const id = Date.now() + Math.random()
+    setToasts(t => [...t, { id, type, msg }])
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4500)
+  }
   const gridWrapRef = useRef<HTMLDivElement | null>(null)
   const [gridW, setGridW] = useState<number>(1000)
 
   useEffect(() => { api.listDashboards().then(setDashboards).catch(() => {}) }, [])
   useEffect(() => {
-    // try load default dashboard on mount
     (async () => {
       const def = await api.getDefaultDashboard().catch(() => null)
       if (def) loadDashboard(def)
@@ -37,13 +42,11 @@ export default function Home() {
     const d = await api.getDashboard(id)
     setActive(d)
     setRowsByKpi({})
-    // set local filters from stored dashboard global_filters if any
     if (d.global_filters && d.global_filters.date) {
       setLocalFilters({ from: d.global_filters.date.from, to: d.global_filters.date.to })
     } else {
       setLocalFilters({})
     }
-    // Auto-load all charts by default
     setTimeout(() => refreshAll(d), 0)
   }
 
@@ -61,6 +64,7 @@ export default function Home() {
     for (const k of dash.kpis || []) {
       await runKpiWithFilters(k)
     }
+    toast('success', 'Dashboard refreshed')
   }
 
   const layout: Layout[] = useMemo(() => {
@@ -72,6 +76,9 @@ export default function Home() {
 
   return (
     <div>
+      <div className="toast-container">
+        {toasts.map(t => (<div key={t.id} className={`toast ${t.type==='success'?'toast-success':'toast-error'}`}>{t.msg}</div>))}
+      </div>
       <div className="topbar header-gradient" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', position: 'sticky', top: 0, zIndex: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button className="btn btn-ghost" onClick={() => setSidebarOpen(o => !o)} title={sidebarOpen ? 'Collapse' : 'Expand'}>|||</button>
@@ -84,7 +91,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="app-grid">
+      <div className={`app-grid ${!sidebarOpen ? 'app-grid--no-sidebar' : ''}`}>
         {sidebarOpen && (
           <div className="sidebar" style={{ display: 'grid', gap: 12 }}>
             <div className="panel">
