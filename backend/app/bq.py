@@ -339,3 +339,74 @@ class BigQueryService:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
+
+    def ensure_kpi_catalog(self, dataset_id: str = "analytics_dash", table: str = "kpi_catalog") -> str:
+        self.ensure_dataset(dataset_id)
+        table_fqn = f"{self.project_id}.{dataset_id}.{table}"
+        try:
+            self.client.get_table(table_fqn)
+        except NotFound:
+            schema = [
+                bigquery.SchemaField("id", "STRING"),
+                bigquery.SchemaField("name", "STRING"),
+                bigquery.SchemaField("sql", "STRING"),
+                bigquery.SchemaField("chart_type", "STRING"),
+                bigquery.SchemaField("expected_schema", "STRING"),
+                bigquery.SchemaField("dataset_id", "STRING"),
+                bigquery.SchemaField("table_id", "STRING"),
+                bigquery.SchemaField("tags", "STRING"),
+                bigquery.SchemaField("engine", "STRING"),
+                bigquery.SchemaField("vega_lite_spec", "STRING"),
+                bigquery.SchemaField("created_at", "TIMESTAMP"),
+                bigquery.SchemaField("usage_count", "INT64"),
+            ]
+            table_obj = bigquery.Table(table_fqn, schema=schema)
+            self.client.create_table(table_obj)
+        return table_fqn
+
+    def add_to_kpi_catalog(self, items: List[Dict[str, Any]], dataset_id: str = "analytics_dash") -> int:
+        table = self.ensure_kpi_catalog(dataset_id)
+        now = datetime.now(timezone.utc).isoformat()
+        rows = []
+        for item in items:
+            rows.append({
+                "id": uuid.uuid4().hex,
+                "name": item.get('name', ''),
+                "sql": item.get('sql', ''),
+                "chart_type": item.get('chart_type', ''),
+                "expected_schema": item.get('expected_schema', ''),
+                "dataset_id": item.get('dataset_id', ''),
+                "table_id": item.get('table_id', ''),
+                "tags": json.dumps(item.get('tags') or {}),
+                "engine": item.get('engine'),
+                "vega_lite_spec": json.dumps(item.get('vega_lite_spec') or {}),
+                "created_at": now,
+                "usage_count": 0,
+            })
+        errors = self.client.insert_rows_json(table, rows)
+        if errors:
+            print(f"KPI catalog insert errors: {errors}")
+            raise RuntimeError(f"Failed to insert kpis: {errors}")
+        return len(rows)
+
+    def list_kpi_catalog(self, dataset_id: str = "analytics_dash", dataset_filter: Optional[str] = None, table_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+        table = self.ensure_kpi_catalog(dataset_id)
+        sql = f"SELECT id, name, sql, chart_type, expected_schema, dataset_id, table_id, tags, engine, vega_lite_spec, CAST(created_at AS STRING) AS created_at, usage_count FROM `{table}`"
+        conds = []
+        params = []
+        if dataset_filter:
+            conds.append("dataset_id = @ds")
+            params.append(bigquery.ScalarQueryParameter("ds", "STRING", dataset_filter))
+        if table_filter:
+            conds.append("table_id = @tb")
+            params.append(bigquery.ScalarQueryParameter("tb", "STRING", table_filter))
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
+        rows = self.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=params), location=self.location)
+        out = []
+        for r in rows:
+            row = dict(r)
+            row['tags'] = json.loads(row['tags']) if row.get('tags') else {}
+            row['vega_lite_spec'] = json.loads(row['vega_lite_spec']) if row.get('vega_lite_spec') else None
+            out.append(row)
+        return out

@@ -24,6 +24,8 @@ from .models import (
 	DashboardSaveResponse,
 	DashboardListResponse,
 	DashboardGetResponse,
+	KPICatalogAddRequest,
+	KPICatalogListResponse,
 )
 from .diagnostics import run_self_test
 
@@ -178,6 +180,31 @@ def get_dashboard(dashboard_id: str):
 		return row
 	except HTTPException:
 		raise
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/kpi_catalog", response_model=Dict[str, Any])
+def kpi_catalog_add(req: KPICatalogAddRequest):
+	try:
+		items = []
+		for k in req.kpis:
+			item = k.model_dump() if hasattr(k, 'model_dump') else dict(k)
+			item['dataset_id'] = req.datasetId
+			item['table_id'] = req.tableId
+			item['tags'] = {"datasetId": req.datasetId, "tableId": req.tableId}
+			items.append(item)
+		count = bq_service.add_to_kpi_catalog(items, dataset_id=DASH_DATASET)
+		return {"inserted": count}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/kpi_catalog", response_model=KPICatalogListResponse)
+def kpi_catalog_list(datasetId: Optional[str] = None, tableId: Optional[str] = None):
+	try:
+		rows = bq_service.list_kpi_catalog(dataset_id=DASH_DATASET, dataset_filter=datasetId, table_filter=tableId)
+		return {"items": rows}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 

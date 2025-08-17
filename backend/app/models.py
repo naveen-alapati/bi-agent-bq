@@ -78,6 +78,30 @@ class RunKpiResponse(BaseModel):
 	rows: List[Dict[str, Any]]
 
 
+# KPI Catalog
+class KPICatalogAddRequest(BaseModel):
+	datasetId: str
+	tableId: str
+	kpis: List[KPIItem]
+
+
+class KPICatalogItem(BaseModel):
+	id: str
+	name: str
+	sql: str
+	chart_type: str
+	expected_schema: str
+	dataset_id: str
+	table_id: str
+	tags: Optional[Dict[str, Any]] = None
+	engine: Optional[str] = None
+	vega_lite_spec: Optional[Dict[str, Any]] = None
+
+
+class KPICatalogListResponse(BaseModel):
+	items: List[KPICatalogItem]
+
+
 # Dashboards
 class DashboardSaveRequest(BaseModel):
 	id: Optional[str] = None
