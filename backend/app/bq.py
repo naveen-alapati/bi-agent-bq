@@ -297,7 +297,7 @@ class BigQueryService:
         maj, mi, pa = map(int, m.groups())
         return f"{maj}.{mi}.{pa+1}"
 
-    def save_dashboard(self, name: str, kpis: List[Dict[str, Any]], layout: Optional[List[Dict[str, Any]]], layouts: Optional[Dict[str, List[Dict[str, Any]]]], selected_tables: List[Dict[str, Any]], global_filters: Optional[Dict[str, Any]], theme: Optional[Dict[str, Any]], version: Optional[str] = None, dashboard_id: Optional[str] = None, dataset_id: str = "analytics_dash") -> str:
+    def save_dashboard(self, name: str, kpis: List[Dict[str, Any]], layout: Optional[List[Dict[str, Any]]], layouts: Optional[Dict[str, List[Dict[str, Any]]]], selected_tables: List[Dict[str, Any]], global_filters: Optional[Dict[str, Any]], theme: Optional[Dict[str, Any]], version: Optional[str] = None, dashboard_id: Optional[str] = None, dataset_id: str = "analytics_dash") -> Tuple[str, str]:
         table = self.ensure_dashboards_table(dataset_id)
         did = dashboard_id or uuid.uuid4().hex
         now = datetime.now(timezone.utc)
@@ -344,7 +344,7 @@ class BigQueryService:
         if errors:
             print(f"Dashboard save errors: {errors}")
             raise RuntimeError(f"Failed to save dashboard: {errors}")
-        return did
+        return did, ver
 
     def list_dashboards(self, dataset_id: str = "analytics_dash") -> List[Dict[str, Any]]:
         table = self.ensure_dashboards_table(dataset_id)

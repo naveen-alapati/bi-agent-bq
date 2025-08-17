@@ -214,7 +214,7 @@ def save_dashboard(req: DashboardSaveRequest):
 		layout = req.layout
 		layouts = req.layouts
 		selected = [s.model_dump() if hasattr(s, 'model_dump') else dict(s) for s in req.selected_tables]
-		new_id = bq_service.save_dashboard(
+		did, ver = bq_service.save_dashboard(
 			name=req.name,
 			kpis=kpis,
 			layout=layout,
@@ -226,7 +226,7 @@ def save_dashboard(req: DashboardSaveRequest):
 			dashboard_id=req.id,
 			dataset_id=DASH_DATASET,
 		)
-		return {"id": new_id, "name": req.name, "version": req.version or ""}
+		return {"id": did, "name": req.name, "version": ver}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
