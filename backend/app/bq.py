@@ -288,39 +288,27 @@ class BigQueryService:
         table = self.ensure_dashboards_table(dataset_id)
         did = dashboard_id or uuid.uuid4().hex
         now = datetime.now(timezone.utc).isoformat()
+        # Delete existing if present
+        try:
+            self.client.query(
+                f"DELETE FROM `{table}` WHERE id=@id",
+                job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", did)]),
+                location=self.location,
+            ).result()
+        except Exception:
+            pass
         row = {
             "id": did,
             "name": name,
-            "kpis": json.dumps(kpis),
-            "layout": json.dumps(layout),
-            "selected_tables": json.dumps(selected_tables),
+            "kpis": kpis,
+            "layout": layout,
+            "selected_tables": selected_tables,
             "created_at": now,
             "updated_at": now,
         }
-        # Use MERGE semantics via DML
-        sql = f"""
-        MERGE `{table}` T
-        USING (SELECT @id AS id, @name AS name, @kpis AS kpis, @layout AS layout, @selected AS selected_tables, @created AS created_at, @updated AS updated_at) S
-        ON T.id = S.id
-        WHEN MATCHED THEN UPDATE SET name=S.name, kpis=S.kpis, layout=S.layout, selected_tables=S.selected_tables, updated_at=S.updated
-        WHEN NOT MATCHED THEN INSERT (id,name,kpis,layout,selected_tables,created_at,updated_at) VALUES (S.id,S.name,S.kpis,S.layout,S.selected_tables,S.created_at,S.updated_at)
-        """
-        job = self.client.query(
-            sql,
-            job_config=bigquery.QueryJobConfig(
-                query_parameters=[
-                    bigquery.ScalarQueryParameter("id", "STRING", did),
-                    bigquery.ScalarQueryParameter("name", "STRING", name),
-                    bigquery.ScalarQueryParameter("kpis", "JSON", row["kpis"]),
-                    bigquery.ScalarQueryParameter("layout", "JSON", row["layout"]),
-                    bigquery.ScalarQueryParameter("selected", "JSON", row["selected_tables"]),
-                    bigquery.ScalarQueryParameter("created", "TIMESTAMP", now),
-                    bigquery.ScalarQueryParameter("updated", "TIMESTAMP", now),
-                ]
-            ),
-            location=self.location,
-        )
-        job.result()
+        errors = self.client.insert_rows_json(table, [row])
+        if errors:
+            raise RuntimeError(f"Failed to save dashboard: {errors}")
         return did
 
     def list_dashboards(self, dataset_id: str = "analytics_dash") -> List[Dict[str, Any]]:
@@ -337,12 +325,19 @@ class BigQueryService:
         if not rows:
             return None
         row = dict(rows[0])
+        def parse_json_field(val: Any) -> Any:
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except Exception:
+                    return val
+            return val
         return {
             "id": row["id"],
             "name": row["name"],
-            "kpis": json.loads(row["kpis"]),
-            "layout": json.loads(row["layout"]),
-            "selected_tables": json.loads(row["selected_tables"]),
+            "kpis": parse_json_field(row["kpis"]),
+            "layout": parse_json_field(row["layout"]),
+            "selected_tables": parse_json_field(row["selected_tables"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
