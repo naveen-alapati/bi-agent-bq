@@ -10,6 +10,7 @@ import csv
 import io
 import zipfile
 from google.cloud import bigquery
+import json
 
 from .bq import BigQueryService
 from .embeddings import EmbeddingMode, EmbeddingService
@@ -32,6 +33,9 @@ from .models import (
 	KPICatalogListResponse,
 )
 from .diagnostics import run_self_test
+from .llm import LLMClient
+
+llm_client = LLMClient()
 
 PROJECT_ID = os.getenv("PROJECT_ID")
 BQ_DATASET_EMBED = os.getenv("BQ_EMBEDDINGS_DATASET", "analytics_poc")
@@ -153,6 +157,60 @@ def edit_sql(payload: Dict[str, str]):
 		instruction = payload.get('instruction', '')
 		new_sql = kpi_service.llm.edit_sql(original_sql, instruction)
 		return {"sql": new_sql}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/kpi/edit")
+def edit_kpi(payload: Dict[str, Any]):
+	"""
+	Payload: { kpi: {id,name,short_description,chart_type,expected_schema,engine,vega_lite_spec,sql,filter_date_column}, instruction: str }
+	Return: updated KPI object
+	"""
+	try:
+		kpi = payload.get('kpi') or {}
+		instruction = payload.get('instruction') or ''
+		system = (
+			"You are a BI chart and SQL assistant. Output only JSON with the following keys: "
+			"name, short_description, chart_type, expected_schema, engine, vega_lite_spec, sql, filter_date_column. "
+			"Based on the instruction, update chart design (vega-lite spec), labels, and BigQuery SQL so that the SQL returns d3/vega-ready rows. "
+			"Ensure expected_schema matches SQL output (timeseries x,y or categorical label,value or scatter x,y[,label]). "
+			"Use BigQuery Standard SQL and safe NULL handling."
+		)
+		user = json.dumps({"kpi": kpi, "instruction": instruction})
+		resp = llm_client.generate_json(system, user)
+		updated = {
+			"id": kpi.get("id"),
+			"name": resp.get("name", kpi.get("name")),
+			"short_description": resp.get("short_description", kpi.get("short_description")),
+			"chart_type": resp.get("chart_type", kpi.get("chart_type")),
+			"expected_schema": resp.get("expected_schema", kpi.get("expected_schema")),
+			"engine": resp.get("engine", kpi.get("engine")),
+			"vega_lite_spec": resp.get("vega_lite_spec", kpi.get("vega_lite_spec")),
+			"sql": resp.get("sql", kpi.get("sql")),
+			"filter_date_column": resp.get("filter_date_column", kpi.get("filter_date_column")),
+		}
+		return {"kpi": updated}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/dashboards/default")
+def set_default_dashboard(payload: Dict[str, str]):
+	try:
+		did = payload.get('id')
+		if not did:
+			raise HTTPException(status_code=400, detail="id required")
+		bq_service.set_default_dashboard(did, dataset_id=DASH_DATASET)
+		return {"status": "ok"}
+	except HTTPException:
+		raise
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get("/api/dashboards/default")
+def get_default_dashboard():
+	try:
+		did = bq_service.get_default_dashboard(dataset_id=DASH_DATASET)
+		return {"id": did}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 

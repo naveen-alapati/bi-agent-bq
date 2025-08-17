@@ -15,6 +15,13 @@ export default function Home() {
   const [gridW, setGridW] = useState<number>(1000)
 
   useEffect(() => { api.listDashboards().then(setDashboards).catch(() => {}) }, [])
+  useEffect(() => {
+    // try load default dashboard on mount
+    (async () => {
+      const def = await api.getDefaultDashboard().catch(() => null)
+      if (def) loadDashboard(def)
+    })()
+  }, [])
 
   useEffect(() => {
     const el = gridWrapRef.current
@@ -84,12 +91,12 @@ export default function Home() {
               <div className="section-title">All Dashboards</div>
               <div className="scroll">
                 {dashboards.map(d => (
-                  <button key={d.id} className="btn" onClick={() => loadDashboard(d.id)} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, background: 'linear-gradient(90deg, var(--surface), rgba(122,218,165,0.2))' }}>
+                  <button key={d.id} className="btn" onClick={() => loadDashboard(d.id)} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, background: d.id === active?.id ? 'linear-gradient(90deg, rgba(35,155,167,0.25), rgba(122,218,165,0.25))' : 'linear-gradient(90deg, var(--surface), rgba(122,218,165,0.2))', borderColor: d.id === active?.id ? 'var(--primary)' : undefined }}>
                     <span style={{ textAlign: 'left' }}>
                       <div className="card-title">{d.name}</div>
                       <div className="card-subtitle">v{d.version}</div>
                     </span>
-                    <span className="chip">View</span>
+                    {d.id === active?.id ? <span className="chip">Selected</span> : <span className="chip">View</span>}
                   </button>
                 ))}
               </div>
