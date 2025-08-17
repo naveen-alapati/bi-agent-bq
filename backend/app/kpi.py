@@ -140,10 +140,19 @@ class KPIService:
                 if self.kpi_fallback_enabled:
                     all_items.extend(self._fallback_kpis_for_table(t.datasetId, t.tableId, k))
                     continue
-                # Log and continue to next table instead of failing the whole request
                 print(f"KPI LLM error for {t.datasetId}.{t.tableId}: {exc}")
                 continue
             table_slug = f"{t.datasetId}.{t.tableId}"
+            # Attempt to infer a reasonable date column from schema for filtering
+            date_col = None
+            try:
+                schema = self.bq.get_table_schema(t.datasetId, t.tableId)
+                for c in schema:
+                    if c.get('type') in ('DATE','TIMESTAMP','DATETIME'):
+                        date_col = c['name']
+                        break
+            except Exception:
+                pass
             count = 0
             for item in (result.get("kpis") or []):
                 if count >= k:
@@ -162,8 +171,9 @@ class KPIService:
                         d3_chart=item.get("d3_chart", ""),
                         expected_schema=expected_schema,
                         sql=sql,
-                        engine=item.get("engine"),
+                        engine=item.get("engine", "vega-lite" if item.get("vega_lite_spec") else None),
                         vega_lite_spec=item.get("vega_lite_spec"),
+                        filter_date_column=item.get("filter_date_column") or date_col,
                     )
                 )
                 count += 1

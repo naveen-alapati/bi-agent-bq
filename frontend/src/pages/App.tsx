@@ -20,6 +20,8 @@ export default function App() {
 	const [layouts, setLayouts] = useState<Layout[]>([])
 	const [dashList, setDashList] = useState<any[]>([])
 	const [saving, setSaving] = useState(false)
+	const [globalDate, setGlobalDate] = useState<{from?: string, to?: string}>({})
+	const [crossFilter, setCrossFilter] = useState<any>(null)
 
 	useEffect(() => {
 		setLoadError('')
@@ -87,6 +89,13 @@ export default function App() {
 					{loading ? 'Analyzing...' : `Analyze (${selected.length})`}
 				</button>
 
+				<div style={{ marginTop: 12 }}>
+					<label style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>Global Date</label>
+					<input type="date" value={globalDate.from || ''} onChange={e => setGlobalDate(s => ({...s, from: e.target.value}))} />
+					<span style={{ margin: '0 6px' }}>to</span>
+					<input type="date" value={globalDate.to || ''} onChange={e => setGlobalDate(s => ({...s, to: e.target.value}))} />
+				</div>
+
 				<div style={{ marginTop: 16 }}>
 					<h3>Dashboards</h3>
 					<input value={dashboardName} onChange={e => setDashboardName(e.target.value)} placeholder="dashboard name" style={{ width: '100%', marginBottom: 8 }} />
@@ -128,7 +137,7 @@ export default function App() {
 								<button onClick={() => runKpi(k)} style={{ fontSize: 12 }}>Run</button>
 							</div>
 							<div style={{ flex: 1, padding: 8 }}>
-								<ChartRenderer chart={k} rows={rowsByKpi[k.id] || []} />
+								<ChartRenderer chart={k} rows={rowsByKpi[k.id] || []} onSelect={(p) => setCrossFilter(p)} />
 							</div>
 						</div>
 					))}

@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react'
 import embed, { VisualizationSpec } from 'vega-embed'
 import { ChartCanvas } from './ChartCanvas'
 
-export function ChartRenderer({ chart, rows }: { chart: any, rows: any[] }) {
+export function ChartRenderer({ chart, rows, onSelect }: { chart: any, rows: any[], onSelect?: (payload: any) => void }) {
   const vegaRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -11,7 +11,14 @@ export function ChartRenderer({ chart, rows }: { chart: any, rows: any[] }) {
         ...(chart.vega_lite_spec as any),
         data: { values: rows || [] },
       }
-      embed(vegaRef.current, spec, { actions: false }).catch(() => {})
+      embed(vegaRef.current, spec, { actions: false }).then((res) => {
+        const view = res.view
+        // Basic click signal wiring
+        view.addEventListener('click', (_evt: any, item: any) => {
+          if (!item || !item.datum) return
+          onSelect && onSelect({ datum: item.datum, chart })
+        })
+      }).catch(() => {})
     }
   }, [chart, rows])
 
