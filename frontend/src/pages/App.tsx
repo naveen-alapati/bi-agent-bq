@@ -46,6 +46,7 @@ export default function App() {
   const [dragTabId, setDragTabId] = useState<string | null>(null)
   const defaultPalette = { primary: '#239BA7', accent: '#7ADAA5', surface: '#ECECBB', warn: '#E1AA36' }
   const [palette, setPalette] = useState<{ primary: string; accent: string; surface: string; warn: string }>(defaultPalette)
+  const [dirty, setDirty] = useState<boolean>(false)
 
   function applyPalette(p: { primary: string; accent: string; surface: string; warn: string }) {
     const r = document.documentElement
@@ -88,6 +89,7 @@ export default function App() {
       setTheme(mode === 'dark' ? 'dark' : 'light')
       const savedPal = (d.theme && (d.theme.palette as any)) || null
       if (savedPal && savedPal.primary) { setPalette(savedPal); applyPalette(savedPal) } else { applyPalette(palette) }
+      setDirty(false)
     }).catch(() => {})
   }, [routeId])
 
@@ -135,6 +137,7 @@ export default function App() {
   function onLayoutChange(newLayout: Layout[]) {
     setLayouts(newLayout)
     setTabLayouts(prev => ({ ...prev, [activeTab]: newLayout }))
+    setDirty(true)
   }
 
   async function saveDashboard(asNew?: boolean) {
@@ -158,6 +161,7 @@ export default function App() {
       setVersion(res.version)
       await api.listDashboards().then(setDashList)
       toast('success', `Saved ${res.name} v${res.version}`)
+      setDirty(false)
     } catch (e: any) {
       toast('error', e?.message || 'Failed to save')
     } finally {
@@ -280,16 +284,17 @@ export default function App() {
       <TopBar
         name={dashboardName}
         version={version}
-        onNameChange={setDashboardName}
+        onNameChange={(v) => { setDashboardName(v); setDirty(true) }}
         onSave={() => saveDashboard(false)}
         onSaveAs={() => saveDashboard(true)}
         globalDate={globalDate}
-        onGlobalDateChange={setGlobalDate}
+        onGlobalDateChange={(v) => { setGlobalDate(v); setDirty(true) }}
         theme={theme}
         onThemeToggle={() => setTheme(t => (t === 'light' ? 'dark' : 'light'))}
         onExportDashboard={exportDashboard}
         onToggleSidebar={() => setSidebarOpen(o => !o)}
         sidebarOpen={sidebarOpen}
+        dirty={dirty}
       />
 
       <div className={`app-grid ${!sidebarOpen ? 'app-grid--no-sidebar' : ''}`}>
@@ -300,21 +305,21 @@ export default function App() {
               <div className="toolbar">
                 <div>
                   <label className="card-subtitle">Primary</label>
-                  <input className="input" type="color" value={palette.primary} onChange={e => { const p = { ...palette, primary: e.target.value }; setPalette(p); applyPalette(p) }} />
+                  <input className="input" type="color" value={palette.primary} onChange={e => { const p = { ...palette, primary: e.target.value }; setPalette(p); applyPalette(p); setDirty(true) }} />
                 </div>
                 <div>
                   <label className="card-subtitle">Accent</label>
-                  <input className="input" type="color" value={palette.accent} onChange={e => { const p = { ...palette, accent: e.target.value }; setPalette(p); applyPalette(p) }} />
+                  <input className="input" type="color" value={palette.accent} onChange={e => { const p = { ...palette, accent: e.target.value }; setPalette(p); applyPalette(p); setDirty(true) }} />
                 </div>
                 <div>
                   <label className="card-subtitle">Surface</label>
-                  <input className="input" type="color" value={palette.surface} onChange={e => { const p = { ...palette, surface: e.target.value }; setPalette(p); applyPalette(p) }} />
+                  <input className="input" type="color" value={palette.surface} onChange={e => { const p = { ...palette, surface: e.target.value }; setPalette(p); applyPalette(p); setDirty(true) }} />
                 </div>
                 <div>
                   <label className="card-subtitle">Warn</label>
-                  <input className="input" type="color" value={palette.warn} onChange={e => { const p = { ...palette, warn: e.target.value }; setPalette(p); applyPalette(p) }} />
+                  <input className="input" type="color" value={palette.warn} onChange={e => { const p = { ...palette, warn: e.target.value }; setPalette(p); applyPalette(p); setDirty(true) }} />
                 </div>
-                <button className="btn btn-sm" onClick={() => { setPalette(defaultPalette); applyPalette(defaultPalette) }}>Reset Palette</button>
+                <button className="btn btn-sm" onClick={() => { setPalette(defaultPalette); applyPalette(defaultPalette); setDirty(true) }}>Reset Palette</button>
               </div>
             </div>
             <div className="panel">
@@ -355,6 +360,7 @@ export default function App() {
                     setTheme(mode === 'dark' ? 'dark' : 'light')
                     const savedPal = (d.theme && (d.theme.palette as any)) || null
                     if (savedPal && savedPal.primary) { setPalette(savedPal); applyPalette(savedPal) } else { applyPalette(palette) }
+                    setDirty(false)
                   })
                 }}>
                   <option value="">Load existing...</option>
@@ -396,7 +402,7 @@ export default function App() {
                   </button>
                 ))}
                 <button className="btn btn-sm" onClick={addTab}>+ Tab</button>
-                {activeTab !== 'overview' && <button className="btn btn-sm" onClick={() => removeTab(activeTab)}>Delete Tab</button>}
+                {activeTab !== 'overview' && <button className="btn btn-sm" onClick={() => { removeTab(activeTab); setDirty(true) }}>Delete Tab</button>}
               </div>
               <div className="scroll">
                 {visibleKpis.map(k => (
@@ -458,7 +464,7 @@ export default function App() {
               </button>
             ))}
             <button className="btn btn-sm" onClick={addTab}>+ Tab</button>
-            {activeTab !== 'overview' && <button className="btn btn-sm" onClick={() => removeTab(activeTab)}>Delete Tab</button>}
+            {activeTab !== 'overview' && <button className="btn btn-sm" onClick={() => { removeTab(activeTab); setDirty(true) }}>Delete Tab</button>}
           </div>
           <GridLayout className="layout" layout={activeLayout} cols={12} rowHeight={30} width={gridW} isResizable isDraggable draggableHandle=".drag-handle" draggableCancel=".no-drag, button, input, textarea, select" onLayoutChange={onLayoutChange}>
             {visibleKpis.map(k => (
@@ -474,14 +480,14 @@ export default function App() {
                       const updated = await api.editKpi(k, instruction)
                       const idx = kpis.findIndex(x => x.id === k.id)
                       if (idx >= 0) {
-                        const next = [...kpis]; next[idx] = { ...next[idx], ...updated }; setKpis(next)
+                        const next = [...kpis]; next[idx] = { ...next[idx], ...updated }; setKpis(next); setDirty(true)
                         try { const [ds,tb] = (k.id||'').split(':')[0].split('.'); if (ds&&tb) await api.addToKpiCatalog(ds,tb,[next[idx]]) } catch {}
                       }
                     }}>AI Edit</button>
                     <button className="btn btn-sm" onClick={async () => {
                       const r = await fetch('/api/export/card', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql: k.sql }) }); const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${k.name||'card'}.csv`; a.click(); URL.revokeObjectURL(url)
                     }}>Export</button>
-                    <button className="btn btn-sm" onClick={() => { const nextKpis = kpis.filter(x => x.id !== k.id); const nextLayout = (activeLayout||[]).filter(l => l.i !== k.id); setKpis(nextKpis); setLayouts(nextLayout); setTabLayouts(prev => ({ ...prev, [activeTab]: nextLayout })) }}>Remove</button>
+                    <button className="btn btn-sm" onClick={() => { const nextKpis = kpis.filter(x => x.id !== k.id); const nextLayout = (activeLayout||[]).filter(l => l.i !== k.id); setKpis(nextKpis); setLayouts(nextLayout); setTabLayouts(prev => ({ ...prev, [activeTab]: nextLayout })); setDirty(true) }}>Remove</button>
                   </div>
                 </div>
                 <div style={{ flex: 1, padding: 8 }} className="no-drag"><ChartRenderer chart={k} rows={rowsByKpi[k.id] || []} onSelect={(p) => setCrossFilter(p)} /></div>
