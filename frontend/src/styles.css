@@ -32,8 +32,10 @@ body {
 
 /* Layout */
 .topbar { background: var(--card); box-shadow: var(--shadow); border-bottom: 1px solid var(--border); }
-.app-grid { display: grid; grid-template-columns: 320px 1fr; gap: 16px; padding: 16px; }
-.sidebar { position: sticky; top: 56px; height: calc(100vh - 56px); overflow: auto; }
+.app-grid { display: grid; gap: 16px; padding: 16px; grid-template-columns: var(--sidebar-w, 320px) 1fr; transition: grid-template-columns .35s ease; }
+.app-grid--collapsed { --sidebar-w: 0px; }
+.sidebar { position: sticky; top: 56px; height: calc(100vh - 56px); overflow: auto; transition: opacity .35s ease; }
+.sidebar.is-collapsed { opacity: 0; pointer-events: none; }
 .panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 12px; }
 
 /* Cards */
@@ -151,3 +153,6 @@ body {
 .toast-error { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.08); }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(-6px);} to { opacity: 1; transform: translateY(0);} }
 @keyframes fadeOut { to { opacity: 0; transform: translateY(-6px);} }
+
+/* Name badge for header */
+.name-badge { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; background: #fff; color: #0b1220; font-weight: 700; border: 1px solid rgba(255,255,255,0.6); }

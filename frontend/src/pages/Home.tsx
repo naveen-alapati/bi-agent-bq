@@ -22,7 +22,21 @@ export default function Home() {
   const [tabs, setTabs] = useState<{ id: string; name: string; order: number }[]>([{ id: 'overview', name: 'Overview', order: 0 }])
   const [activeTab, setActiveTab] = useState<string>('overview')
 
-  useEffect(() => { api.listDashboards().then(setDashboards).catch(() => {}) }, [])
+  useEffect(() => { api.listDashboards().then((rows) => {
+    // dedupe by name, keep latest updated_at
+    const byName: Record<string, any> = {}
+    for (const d of rows || []) {
+      const key = d.name
+      const prev = byName[key]
+      if (!prev) byName[key] = d
+      else {
+        const prevTs = Date.parse(prev.updated_at || prev.created_at || '0')
+        const curTs = Date.parse(d.updated_at || d.created_at || '0')
+        if (curTs >= prevTs) byName[key] = d
+      }
+    }
+    setDashboards(Object.values(byName))
+  }).catch(() => {}) }, [])
   useEffect(() => {
     (async () => {
       const def = await api.getDefaultDashboard().catch(() => null)
@@ -95,9 +109,9 @@ export default function Home() {
         </div>
       </div>
 
-      <div className={`app-grid ${!sidebarOpen ? 'app-grid--no-sidebar' : ''}`}>
-        {sidebarOpen && (
-          <div className="sidebar" style={{ display: 'grid', gap: 12 }}>
+      <div className={`app-grid ${!sidebarOpen ? 'app-grid--collapsed' : ''}`}>
+        {(
+          <div className={`sidebar ${!sidebarOpen ? 'is-collapsed' : ''}`} style={{ display: 'grid', gap: 12 }}>
             <div className="panel">
               <div className="section-title">All Dashboards</div>
               <div className="scroll">
