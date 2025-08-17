@@ -375,24 +375,67 @@ def cxo_send(payload: Dict[str, Any]):
 		context = payload.get('context') or {}
 		if not conversation_id:
 			raise HTTPException(status_code=400, detail="conversation_id required")
-		# store user message
-		bq_service.add_cxo_message(conversation_id, role="user", content=message)
+		# store user message with embedding
+		user_emb = None
+		try:
+			user_emb = embedding_service.embed_text(message)
+		except Exception:
+			user_emb = []
+		bq_service.add_cxo_message(conversation_id, role="user", content=message, embedding=user_emb)
 		# build prompt from context (KPIs data summaries) and user message
 		kpis = context.get('kpis') or []
 		active_tab = context.get('active_tab') or 'overview'
 		dashboard_name = context.get('dashboard_name') or ''
+		# Optionally skip if no data rows
+		kpis_with_data = []
+		for k in kpis:
+			rows = k.get('rows') or []
+			if rows:
+				# cap to 100 rows per KPI
+				kpis_with_data.append({"id": k.get('id'), "name": k.get('name'), "rows": rows[:100]})
+		if not kpis_with_data:
+			resp_md = "No data is available for the current tab. Run or refresh KPIs to generate a summary."
+			bq_service.add_cxo_message(conversation_id, role="assistant", content=resp_md, embedding=[])
+			return {"reply": resp_md}
 		sys = (
 			"You are CXO AI Assist for a CEO named Naveen Alapati. "
 			"Act as an all-round strategist. Be concise, executive, and action-oriented. "
-			"Leverage the provided dashboard KPIs for the active tab."
+			"ONLY use the provided KPI data rows. If a section has no relevant data, omit it. "
+			"Output strictly Markdown (no JSON)."
 		)
-		data = {"dashboard": dashboard_name, "active_tab": active_tab, "kpis": kpis, "question": message}
-		resp = llm_client.generate_json(sys, json.dumps(data))
-		bot_text = resp.get('text') if isinstance(resp, dict) else json.dumps(resp)
+		user_obj = {
+			"instruction": (
+				"Create an executive summary using Markdown with these sections when supported by data: "
+				"1. Executive Overview (top KPIs, short narrative). "
+				"2. Financial Health Snapshot (revenue growth, margins, cost-to-serve). "
+				"3. Customer & Market Pulse (NPS/CSAT, acquisition vs churn). "
+				"4. Operational Efficiency Highlights (productivity, utilization, bottlenecks). "
+				"Skip sections with no data."
+			),
+			"dashboard": dashboard_name,
+			"active_tab": active_tab,
+			"kpis": kpis_with_data,
+			"question": message or "Generate executive summary from available data."
+		}
+		# Ask model to return JSON with a single 'text' key that contains Markdown only
+		resp = llm_client.generate_json(
+			"Return JSON with key 'text' only, where value is Markdown. Do not include any other keys.",
+			json.dumps(user_obj),
+		)
+		bot_text = ""
+		try:
+			bot_text = resp.get('text') if isinstance(resp, dict) else ""
+		except Exception:
+			bot_text = ""
 		if not bot_text:
-			# fall back to raw JSON for v1
-			bot_text = json.dumps(resp)
-		bq_service.add_cxo_message(conversation_id, role="assistant", content=bot_text)
+			bot_text = "No summary could be generated."
+		# store assistant message with embedding
+		asst_emb = None
+		try:
+			asst_emb = embedding_service.embed_text(bot_text)
+		except Exception:
+			asst_emb = []
+		bq_service.add_cxo_message(conversation_id, role="assistant", content=bot_text, embedding=asst_emb)
 		return {"reply": bot_text}
 	except HTTPException:
 		raise

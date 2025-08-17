@@ -91,7 +91,7 @@ export default function Home() {
     if (!convId) {
       const id = await api.cxoStart(active.id, active.name, activeTab)
       setConvId(id)
-      const welcome = `Hello Naveen Alapati (CEO). I am your CXO AI Assist. I have your dashboard “${active.name}” (tab: ${activeTab}) loaded. How can I help today?`
+      const welcome = `Hello Naveen Alapati. I am your CXO AI Assist. How can I help today?`
       setChat([{ role: 'assistant', text: welcome }])
     }
     setCxoOpen(true); setCxoMin(false)
@@ -105,7 +105,7 @@ export default function Home() {
     const context = {
       dashboard_name: active.name,
       active_tab: activeTab,
-      kpis: (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview')).map((k:any) => ({ id: k.id, name: k.name, sql: k.sql, expected_schema: k.expected_schema }))
+      kpis: (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview')).map((k:any) => ({ id: k.id, name: k.name, rows: rowsByKpi[k.id] || [] }))
     }
     const reply = await api.cxoSend(convId, msg, context)
     setChat(prev => [...prev, { role: 'assistant', text: reply }])
