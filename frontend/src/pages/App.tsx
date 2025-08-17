@@ -44,7 +44,19 @@ export default function App() {
   const [editingTabId, setEditingTabId] = useState<string | null>(null)
   const [editingTabName, setEditingTabName] = useState<string>('')
   const [dragTabId, setDragTabId] = useState<string | null>(null)
-  const tabColors = ['#239BA7', '#7ADAA5', '#E1AA36', '#5B8DEF', '#C084FC']
+  const [palette, setPalette] = useState<{ primary: string; accent: string; surface: string; warn: string }>({ primary: '#239BA7', accent: '#7ADAA5', surface: '#ECECBB', warn: '#E1AA36' })
+
+  function applyPalette(p: { primary: string; accent: string; surface: string; warn: string }) {
+    const r = document.documentElement
+    r.style.setProperty('--primary', p.primary)
+    r.style.setProperty('--accent', p.accent)
+    r.style.setProperty('--surface', p.surface)
+    r.style.setProperty('--warn', p.warn)
+  }
+
+  useEffect(() => { applyPalette(palette) }, [])
+
+  const tabColors = [palette.primary, palette.accent, palette.warn, palette.surface]
   const colorForTab = (id: string, idx: number) => tabColors[idx % tabColors.length]
 
   useEffect(() => {
@@ -73,6 +85,8 @@ export default function App() {
       setGlobalDate((d.global_filters && d.global_filters.date) || {})
       const mode = (d.theme && (d.theme.mode as any)) || 'light'
       setTheme(mode === 'dark' ? 'dark' : 'light')
+      const savedPal = (d.theme && (d.theme.palette as any)) || null
+      if (savedPal && savedPal.primary) { setPalette(savedPal); applyPalette(savedPal) } else { applyPalette(palette) }
     }).catch(() => {})
   }, [routeId])
 
@@ -134,7 +148,7 @@ export default function App() {
         layouts: undefined,
         selected_tables: selected,
         global_filters: { date: globalDate },
-        theme: { mode: theme },
+        theme: { mode: theme, palette },
         tabs,
         tab_layouts: tabLayouts,
         last_active_tab: activeTab,
@@ -281,6 +295,27 @@ export default function App() {
         {sidebarOpen && (
           <div className="sidebar" style={{ display: 'grid', gap: 12 }}>
             <div className="panel">
+              <div className="section-title">Theme</div>
+              <div className="toolbar">
+                <div>
+                  <label className="card-subtitle">Primary</label>
+                  <input className="input" type="color" value={palette.primary} onChange={e => { const p = { ...palette, primary: e.target.value }; setPalette(p); applyPalette(p) }} />
+                </div>
+                <div>
+                  <label className="card-subtitle">Accent</label>
+                  <input className="input" type="color" value={palette.accent} onChange={e => { const p = { ...palette, accent: e.target.value }; setPalette(p); applyPalette(p) }} />
+                </div>
+                <div>
+                  <label className="card-subtitle">Surface</label>
+                  <input className="input" type="color" value={palette.surface} onChange={e => { const p = { ...palette, surface: e.target.value }; setPalette(p); applyPalette(p) }} />
+                </div>
+                <div>
+                  <label className="card-subtitle">Warn</label>
+                  <input className="input" type="color" value={palette.warn} onChange={e => { const p = { ...palette, warn: e.target.value }; setPalette(p); applyPalette(p) }} />
+                </div>
+              </div>
+            </div>
+            <div className="panel">
               <div className="section-title">Data</div>
               {loadError && <div className="badge" style={{ marginBottom: 8, borderColor: 'crimson', color: 'crimson', background: 'rgba(220,20,60,0.06)' }}>{loadError}</div>}
               {datasets.length === 0 ? (
@@ -292,12 +327,10 @@ export default function App() {
                 {loading ? 'Analyzing...' : `Analyze (${selected.length})`}
               </button>
             </div>
-
             <div className="panel">
               <div className="section-title">KPI Catalog</div>
               <KPICatalog onAdd={addKpiToCanvas} />
             </div>
-
             <div className="panel">
               <div className="section-title">Dashboards</div>
               <div style={{ marginTop: 8 }}>
@@ -307,13 +340,19 @@ export default function App() {
                   api.getDashboard(id).then(d => {
                     setDashboardName(d.name)
                     setVersion(d.version || '')
-                    setKpis(d.kpis)
-                    const nextLayout = (d.layout && d.layout.length ? d.layout : (d.layouts && (d.layouts['lg'] || d.layouts['md'] || d.layouts['sm']) || [])) as Layout[]
-                    setLayouts(nextLayout)
+                    setKpis(d.kpis.map((k:any) => ({ ...k, tabs: Array.isArray(k.tabs) && k.tabs.length ? k.tabs : ['overview'] })))
+                    const nextTabs = (d.tabs && d.tabs.length ? d.tabs : [{ id: 'overview', name: 'Overview', order: 0 }])
+                    setTabs(nextTabs)
+                    const tl = d.tab_layouts || {}
+                    if (!tl['overview'] && Array.isArray(d.layout)) tl['overview'] = d.layout
+                    setTabLayouts(tl)
+                    setActiveTab(d.last_active_tab || 'overview')
                     setSelected(d.selected_tables)
                     setGlobalDate((d.global_filters && d.global_filters.date) || {})
                     const mode = (d.theme && (d.theme.mode as any)) || 'light'
                     setTheme(mode === 'dark' ? 'dark' : 'light')
+                    const savedPal = (d.theme && (d.theme.palette as any)) || null
+                    if (savedPal && savedPal.primary) { setPalette(savedPal); applyPalette(savedPal) } else { applyPalette(palette) }
                   })
                 }}>
                   <option value="">Load existing...</option>
@@ -321,6 +360,49 @@ export default function App() {
                     <option key={d.id} value={d.id}>{d.name} (v{d.version})</option>
                   ))}
                 </select>
+              </div>
+            </div>
+            <div className="panel">
+              <div className="section-title">Tabs</div>
+              <div className="toolbar" style={{ marginBottom: 8 }}>
+                {tabs.sort((a,b)=>a.order-b.order).map((t, idx) => (
+                  <button
+                    key={t.id}
+                    className="btn btn-sm"
+                    style={{ background: t.id===activeTab? colorForTab(t.id, idx):'', color: t.id===activeTab? '#0b1220': undefined, borderColor: t.id===activeTab? colorForTab(t.id, idx):'' }}
+                    onClick={() => setActiveTab(t.id)}
+                    draggable
+                    onDragStart={(e) => onDragStartTab(t.id, e)}
+                    onDragOver={onDragOverTab}
+                    onDrop={(e) => onDropTab(t.id, e)}
+                    onDoubleClick={() => startEditTab(t)}
+                  >
+                    {editingTabId === t.id ? (
+                      <input
+                        className="input"
+                        value={editingTabName}
+                        onChange={e => setEditingTabName(e.target.value)}
+                        autoFocus
+                        onBlur={commitEditTab}
+                        onKeyDown={e => { if (e.key === 'Enter') commitEditTab(); if (e.key === 'Escape') cancelEditTab() }}
+                        onClick={e => e.stopPropagation()}
+                        style={{ maxWidth: 120 }}
+                      />
+                    ) : (
+                      <span>{t.name}</span>
+                    )}
+                  </button>
+                ))}
+                <button className="btn btn-sm" onClick={addTab}>+ Tab</button>
+                {activeTab !== 'overview' && <button className="btn btn-sm" onClick={() => removeTab(activeTab)}>Delete Tab</button>}
+              </div>
+              <div className="scroll">
+                {visibleKpis.map(k => (
+                  <label key={k.id} className="list-item" style={{ gap: 8 }}>
+                    <span style={{ flex: 1 }}>{k.name}</span>
+                    <button className="btn btn-sm" onClick={() => toggleKpiTab(k, activeTab)}>{(k.tabs||[]).includes(activeTab)? 'Remove from Tab':'Add to Tab'}</button>
+                  </label>
+                ))}
               </div>
             </div>
           </div>
