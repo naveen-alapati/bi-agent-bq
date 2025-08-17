@@ -11,6 +11,8 @@ export function TopBar({
   theme,
   onThemeToggle,
   onExportDashboard,
+  onToggleSidebar,
+  sidebarOpen,
 }: {
   name: string
   version?: string
@@ -22,10 +24,14 @@ export function TopBar({
   theme: 'light' | 'dark'
   onThemeToggle: () => void
   onExportDashboard: () => void
+  onToggleSidebar?: () => void
+  sidebarOpen?: boolean
 }) {
   return (
     <div className="topbar header-gradient" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', position: 'sticky', top: 0, zIndex: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button className="btn btn-ghost" onClick={onToggleSidebar} title={sidebarOpen ? 'Collapse' : 'Expand'}>|||</button>
+        <a className="btn btn-ghost" href="/">Home</a>
         <input className="input" value={name} onChange={e => onNameChange(e.target.value)} placeholder="dashboard name" style={{ fontSize: 16, fontWeight: 600 }} />
         {version && <span className="badge">v{version}</span>}
         <button className="btn btn-primary" onClick={onSave}>Save</button>
