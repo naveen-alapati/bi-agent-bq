@@ -29,8 +29,9 @@ export function ChartRenderer({ chart, rows, onSelect }: { chart: any, rows: any
       const spec: VisualizationSpec = {
         ...(baseSpec as any),
         data: { values: rows || [] },
-        width: Math.floor(size.w),
-        height: Math.floor(size.h),
+        width: 'container' as any,
+        height: 'container' as any,
+        autosize: { type: 'fit', contains: 'padding', resize: true } as any,
       }
       embed(vegaRef.current!, spec, { actions: false, renderer: 'canvas' }).then((res) => {
         result = res
@@ -52,7 +53,7 @@ export function ChartRenderer({ chart, rows, onSelect }: { chart: any, rows: any
   }, [chart, rows, size])
 
   if (chart.engine === 'vega-lite' && chart.vega_lite_spec) {
-    return <div ref={wrapRef} className="no-drag" style={{ width: '100%', height: '100%' }}>
+    return <div ref={wrapRef} className="no-drag" style={{ width: '100%', height: '100%', minHeight: 200 }}>
       <div ref={vegaRef} style={{ width: '100%', height: '100%' }} />
     </div>
   }
