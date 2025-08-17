@@ -267,6 +267,14 @@ export default function App() {
                         const next = [...kpis]
                         next[idx] = { ...next[idx], ...updated }
                         setKpis(next)
+                        // also persist to KPI catalog
+                        try {
+                          const prefix = (k.id || '').split(':')[0]
+                          const [ds, tb] = prefix.split('.')
+                          if (ds && tb) {
+                            await api.addToKpiCatalog(ds, tb, [next[idx]])
+                          }
+                        } catch {}
                       }
                     }}>AI Edit</button>
                     <button className="btn btn-sm" onClick={async () => {

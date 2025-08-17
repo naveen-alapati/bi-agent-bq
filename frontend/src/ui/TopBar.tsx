@@ -37,14 +37,11 @@ export function TopBar({
         <button className="btn btn-primary" onClick={onSave}>Save</button>
         <button className="btn btn-ghost" onClick={onSaveAs}>Save As</button>
       </div>
-      <div className="toolbar">
-        <div>
-          <label style={{ fontSize: 12, opacity: 0.9, display: 'block' }}>Date</label>
-          <div>
-            <input className="input" type="date" value={globalDate.from || ''} onChange={e => onGlobalDateChange({ ...globalDate, from: e.target.value })} />
-            <span style={{ margin: '0 6px' }}>to</span>
-            <input className="input" type="date" value={globalDate.to || ''} onChange={e => onGlobalDateChange({ ...globalDate, to: e.target.value })} />
-          </div>
+      <div className="toolbar" style={{ alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input className="input" type="date" value={globalDate.from || ''} onChange={e => onGlobalDateChange({ ...globalDate, from: e.target.value })} />
+          <span>to</span>
+          <input className="input" type="date" value={globalDate.to || ''} onChange={e => onGlobalDateChange({ ...globalDate, to: e.target.value })} />
         </div>
         <button className="btn" onClick={onExportDashboard}>Export CSV</button>
         <button className="btn" onClick={onThemeToggle}>{theme === 'light' ? 'Dark' : 'Light'} Theme</button>

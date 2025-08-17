@@ -169,6 +169,16 @@ def edit_kpi(payload: Dict[str, Any]):
 	try:
 		kpi = payload.get('kpi') or {}
 		instruction = payload.get('instruction') or ''
+		# Try to extract dataset/table for context
+		dataset = None
+		table = None
+		try:
+			# id like "dataset.table:slug"
+			parts = (kpi.get('id') or '').split(':')[0].split('.')
+			if len(parts) >= 2:
+				dataset, table = parts[0], parts[1]
+		except Exception:
+			pass
 		system = (
 			"You are a BI chart and SQL assistant. Output only JSON with the following keys: "
 			"name, short_description, chart_type, expected_schema, engine, vega_lite_spec, sql, filter_date_column. "
@@ -176,7 +186,10 @@ def edit_kpi(payload: Dict[str, Any]):
 			"Ensure expected_schema matches SQL output (timeseries x,y or categorical label,value or scatter x,y[,label]). "
 			"Use BigQuery Standard SQL and safe NULL handling."
 		)
-		user = json.dumps({"kpi": kpi, "instruction": instruction})
+		user_obj = {"kpi": kpi, "instruction": instruction}
+		if dataset and table:
+			user_obj["context"] = {"project": PROJECT_ID, "dataset": dataset, "table": table}
+		user = json.dumps(user_obj)
 		resp = llm_client.generate_json(system, user)
 		updated = {
 			"id": kpi.get("id"),
