@@ -7,6 +7,7 @@ import re
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
 import uuid
+import re as _re
 
 
 class BigQueryService:
@@ -273,9 +274,13 @@ class BigQueryService:
             schema = [
                 bigquery.SchemaField("id", "STRING"),
                 bigquery.SchemaField("name", "STRING"),
+                bigquery.SchemaField("version", "STRING"),
                 bigquery.SchemaField("kpis", "STRING"),
                 bigquery.SchemaField("layout", "STRING"),
+                bigquery.SchemaField("layouts", "STRING"),
                 bigquery.SchemaField("selected_tables", "STRING"),
+                bigquery.SchemaField("global_filters", "STRING"),
+                bigquery.SchemaField("theme", "STRING"),
                 bigquery.SchemaField("created_at", "TIMESTAMP"),
                 bigquery.SchemaField("updated_at", "TIMESTAMP"),
             ]
@@ -283,15 +288,41 @@ class BigQueryService:
             self.client.create_table(table_obj)
         return table_fqn
 
-    def save_dashboard(self, name: str, kpis: List[Dict[str, Any]], layout: List[Dict[str, Any]], selected_tables: List[Dict[str, Any]], dashboard_id: Optional[str] = None, dataset_id: str = "analytics_dash") -> str:
+    def _next_patch(self, current: Optional[str]) -> str:
+        if not current:
+            return "1.0.0"
+        m = _re.match(r"(\d+)\.(\d+)\.(\d+)", current)
+        if not m:
+            return "1.0.0"
+        maj, mi, pa = map(int, m.groups())
+        return f"{maj}.{mi}.{pa+1}"
+
+    def save_dashboard(self, name: str, kpis: List[Dict[str, Any]], layout: Optional[List[Dict[str, Any]]], layouts: Optional[Dict[str, List[Dict[str, Any]]]], selected_tables: List[Dict[str, Any]], global_filters: Optional[Dict[str, Any]], theme: Optional[Dict[str, Any]], version: Optional[str] = None, dashboard_id: Optional[str] = None, dataset_id: str = "analytics_dash") -> Tuple[str, str]:
         table = self.ensure_dashboards_table(dataset_id)
         did = dashboard_id or uuid.uuid4().hex
         now = datetime.now(timezone.utc)
-        # Delete existing if present
+        # determine next version if not provided: find latest for same name
+        ver = version
+        if not ver:
+            try:
+                rows = list(self.client.query(
+                    f"SELECT version FROM `{table}` WHERE name=@n ORDER BY updated_at DESC LIMIT 1",
+                    job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("n","STRING", name)]),
+                    location=self.location,
+                ))
+                latest = dict(rows[0])['version'] if rows else None
+                ver = self._next_patch(latest)
+            except Exception:
+                ver = "1.0.0"
+        # Delete existing by id (Save) or same name+version (rare collision)
         try:
             self.client.query(
-                f"DELETE FROM `{table}` WHERE id=@id",
-                job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", did)]),
+                f"DELETE FROM `{table}` WHERE id=@id OR (name=@n AND version=@v)",
+                job_config=bigquery.QueryJobConfig(query_parameters=[
+                    bigquery.ScalarQueryParameter("id","STRING", did),
+                    bigquery.ScalarQueryParameter("n","STRING", name),
+                    bigquery.ScalarQueryParameter("v","STRING", ver),
+                ]),
                 location=self.location,
             ).result()
         except Exception:
@@ -299,9 +330,13 @@ class BigQueryService:
         row = {
             "id": did,
             "name": name,
+            "version": ver,
             "kpis": json.dumps(kpis),
-            "layout": json.dumps(layout),
+            "layout": json.dumps(layout or []),
+            "layouts": json.dumps(layouts or {}),
             "selected_tables": json.dumps(selected_tables),
+            "global_filters": json.dumps(global_filters or {}),
+            "theme": json.dumps(theme or {}),
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
         }
@@ -309,17 +344,17 @@ class BigQueryService:
         if errors:
             print(f"Dashboard save errors: {errors}")
             raise RuntimeError(f"Failed to save dashboard: {errors}")
-        return did
+        return did, ver
 
     def list_dashboards(self, dataset_id: str = "analytics_dash") -> List[Dict[str, Any]]:
         table = self.ensure_dashboards_table(dataset_id)
-        sql = f"SELECT id, name, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at FROM `{table}` ORDER BY updated_at DESC"
+        sql = f"SELECT id, name, version, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at FROM `{table}` ORDER BY name, updated_at DESC"
         rows = [dict(r) for r in self.client.query(sql, location=self.location)]
         return rows
 
     def get_dashboard(self, dashboard_id: str, dataset_id: str = "analytics_dash") -> Optional[Dict[str, Any]]:
         table = self.ensure_dashboards_table(dataset_id)
-        sql = f"SELECT id, name, kpis, layout, selected_tables, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at FROM `{table}` WHERE id=@id LIMIT 1"
+        sql = f"SELECT id, name, version, kpis, layout, layouts, selected_tables, global_filters, theme, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at FROM `{table}` WHERE id=@id LIMIT 1"
         job = self.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", dashboard_id)]), location=self.location)
         rows = list(job)
         if not rows:
@@ -333,9 +368,84 @@ class BigQueryService:
         return {
             "id": row["id"],
             "name": row["name"],
+            "version": row.get("version"),
             "kpis": parse_json_field(row["kpis"]),
             "layout": parse_json_field(row["layout"]),
+            "layouts": parse_json_field(row.get("layouts") or "{}"),
             "selected_tables": parse_json_field(row["selected_tables"]),
+            "global_filters": parse_json_field(row.get("global_filters") or "{}"),
+            "theme": parse_json_field(row.get("theme") or "{}"),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
+
+    def ensure_kpi_catalog(self, dataset_id: str = "analytics_dash", table: str = "kpi_catalog") -> str:
+        self.ensure_dataset(dataset_id)
+        table_fqn = f"{self.project_id}.{dataset_id}.{table}"
+        try:
+            self.client.get_table(table_fqn)
+        except NotFound:
+            schema = [
+                bigquery.SchemaField("id", "STRING"),
+                bigquery.SchemaField("name", "STRING"),
+                bigquery.SchemaField("sql", "STRING"),
+                bigquery.SchemaField("chart_type", "STRING"),
+                bigquery.SchemaField("expected_schema", "STRING"),
+                bigquery.SchemaField("dataset_id", "STRING"),
+                bigquery.SchemaField("table_id", "STRING"),
+                bigquery.SchemaField("tags", "STRING"),
+                bigquery.SchemaField("engine", "STRING"),
+                bigquery.SchemaField("vega_lite_spec", "STRING"),
+                bigquery.SchemaField("created_at", "TIMESTAMP"),
+                bigquery.SchemaField("usage_count", "INT64"),
+            ]
+            table_obj = bigquery.Table(table_fqn, schema=schema)
+            self.client.create_table(table_obj)
+        return table_fqn
+
+    def add_to_kpi_catalog(self, items: List[Dict[str, Any]], dataset_id: str = "analytics_dash") -> int:
+        table = self.ensure_kpi_catalog(dataset_id)
+        now = datetime.now(timezone.utc).isoformat()
+        rows = []
+        for item in items:
+            rows.append({
+                "id": uuid.uuid4().hex,
+                "name": item.get('name', ''),
+                "sql": item.get('sql', ''),
+                "chart_type": item.get('chart_type', ''),
+                "expected_schema": item.get('expected_schema', ''),
+                "dataset_id": item.get('dataset_id', ''),
+                "table_id": item.get('table_id', ''),
+                "tags": json.dumps(item.get('tags') or {}),
+                "engine": item.get('engine'),
+                "vega_lite_spec": json.dumps(item.get('vega_lite_spec') or {}),
+                "created_at": now,
+                "usage_count": 0,
+            })
+        errors = self.client.insert_rows_json(table, rows)
+        if errors:
+            print(f"KPI catalog insert errors: {errors}")
+            raise RuntimeError(f"Failed to insert kpis: {errors}")
+        return len(rows)
+
+    def list_kpi_catalog(self, dataset_id: str = "analytics_dash", dataset_filter: Optional[str] = None, table_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+        table = self.ensure_kpi_catalog(dataset_id)
+        sql = f"SELECT id, name, sql, chart_type, expected_schema, dataset_id, table_id, tags, engine, vega_lite_spec, CAST(created_at AS STRING) AS created_at, usage_count FROM `{table}`"
+        conds = []
+        params = []
+        if dataset_filter:
+            conds.append("dataset_id = @ds")
+            params.append(bigquery.ScalarQueryParameter("ds", "STRING", dataset_filter))
+        if table_filter:
+            conds.append("table_id = @tb")
+            params.append(bigquery.ScalarQueryParameter("tb", "STRING", table_filter))
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
+        rows = self.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=params), location=self.location)
+        out = []
+        for r in rows:
+            row = dict(r)
+            row['tags'] = json.loads(row['tags']) if row.get('tags') else {}
+            row['vega_lite_spec'] = json.loads(row['vega_lite_spec']) if row.get('vega_lite_spec') else None
+            out.append(row)
+        return out

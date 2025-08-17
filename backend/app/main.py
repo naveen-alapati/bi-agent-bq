@@ -1,11 +1,14 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import os
 from datetime import datetime
+import csv
+import io
+import zipfile
 
 from .bq import BigQueryService
 from .embeddings import EmbeddingMode, EmbeddingService
@@ -24,6 +27,8 @@ from .models import (
 	DashboardSaveResponse,
 	DashboardListResponse,
 	DashboardGetResponse,
+	KPICatalogAddRequest,
+	KPICatalogListResponse,
 )
 from .diagnostics import run_self_test
 
@@ -137,6 +142,60 @@ def run_kpi(req: RunKpiRequest):
 		raise HTTPException(status_code=400, detail=str(exc))
 
 
+@app.post("/api/sql/edit")
+def edit_sql(payload: Dict[str, str]):
+	try:
+		original_sql = payload.get('sql', '')
+		instruction = payload.get('instruction', '')
+		new_sql = kpi_service.llm.edit_sql(original_sql, instruction)
+		return {"sql": new_sql}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/export/card")
+def export_card(payload: Dict[str, Any]):
+	try:
+		sql = payload.get('sql', '')
+		rows = bq_service.query_rows(sql)
+		# CSV export
+		output = io.StringIO()
+		writer = None
+		for r in rows:
+			if writer is None:
+				writer = csv.DictWriter(output, fieldnames=list(r.keys()))
+				writer.writeheader()
+			writer.writerow(r)
+		output.seek(0)
+		return StreamingResponse(iter([output.getvalue()]), media_type='text/csv', headers={'Content-Disposition': 'attachment; filename="card.csv"'})
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/export/dashboard")
+def export_dashboard(payload: Dict[str, Any]):
+	try:
+		kpis = payload.get('kpis', [])
+		archive = io.BytesIO()
+		with zipfile.ZipFile(archive, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
+			for i, k in enumerate(kpis):
+				sql = k.get('sql', '')
+				rows = bq_service.query_rows(sql)
+				csv_buf = io.StringIO()
+				writer = None
+				for r in rows:
+					if writer is None:
+						writer = csv.DictWriter(csv_buf, fieldnames=list(r.keys()))
+						writer.writeheader()
+					writer.writerow(r)
+				csv_content = csv_buf.getvalue()
+				zf.writestr(f"card_{i+1}.csv", csv_content)
+		archive.seek(0)
+		return StreamingResponse(archive, media_type='application/zip', headers={'Content-Disposition': 'attachment; filename="dashboard.zip"'})
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.get("/api/selftest")
 def api_selftest(dataset: Optional[str] = None, limit_tables: int = 3, sample_rows: int = 3, k: int = 3, run_kpis_limit: int = 2, force_llm: bool = True):
 	try:
@@ -153,9 +212,21 @@ def save_dashboard(req: DashboardSaveRequest):
 		# serialize KPI Pydantic models to dicts
 		kpis = [k.model_dump() if hasattr(k, 'model_dump') else dict(k) for k in req.kpis]
 		layout = req.layout
+		layouts = req.layouts
 		selected = [s.model_dump() if hasattr(s, 'model_dump') else dict(s) for s in req.selected_tables]
-		new_id = bq_service.save_dashboard(name=req.name, kpis=kpis, layout=layout, selected_tables=selected, dashboard_id=req.id, dataset_id=DASH_DATASET)
-		return {"id": new_id, "name": req.name}
+		did, ver = bq_service.save_dashboard(
+			name=req.name,
+			kpis=kpis,
+			layout=layout,
+			layouts=layouts,
+			selected_tables=selected,
+			global_filters=req.global_filters,
+			theme=req.theme,
+			version=req.version,
+			dashboard_id=req.id,
+			dataset_id=DASH_DATASET,
+		)
+		return {"id": did, "name": req.name, "version": ver}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
@@ -178,6 +249,31 @@ def get_dashboard(dashboard_id: str):
 		return row
 	except HTTPException:
 		raise
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/kpi_catalog", response_model=Dict[str, Any])
+def kpi_catalog_add(req: KPICatalogAddRequest):
+	try:
+		items = []
+		for k in req.kpis:
+			item = k.model_dump() if hasattr(k, 'model_dump') else dict(k)
+			item['dataset_id'] = req.datasetId
+			item['table_id'] = req.tableId
+			item['tags'] = {"datasetId": req.datasetId, "tableId": req.tableId}
+			items.append(item)
+		count = bq_service.add_to_kpi_catalog(items, dataset_id=DASH_DATASET)
+		return {"inserted": count}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/kpi_catalog", response_model=KPICatalogListResponse)
+def kpi_catalog_list(datasetId: Optional[str] = None, tableId: Optional[str] = None):
+	try:
+		rows = bq_service.list_kpi_catalog(dataset_id=DASH_DATASET, dataset_filter=datasetId, table_filter=tableId)
+		return {"items": rows}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
