@@ -17,10 +17,11 @@ SYSTEM_PROMPT_TEMPLATE = (
     "- d3_chart (a short suggestion: e.g. \"d3.line() with x=date, y=value\", or \"d3.bar() with label,value\"), "
     "- expected_schema (one of: timeseries {{x:DATE|TIMESTAMP or STRING, y:NUMBER}}, categorical {{label:STRING, value:NUMBER}}, distribution {{label, value}}), "
     "- sql (BigQuery standard SQL) — this SQL must be ready-to-run and must return columns that match expected_schema. "
+    "- Prefer engine='vega-lite' and provide vega_lite_spec that uses data: {{values: []}} and encodes fields x/y or label/value accordingly. "
     "Use the table reference exactly as `project.dataset.table`. If using aggregation, alias columns exactly to x,y or label,value depending on expected_schema. "
     "Keep SQL simple and efficient (use LIMIT where useful). Use safe handling for NULLs. "
     "INPUT_DATA is a JSON object. "
-    "Return value: JSON object: {{ \"kpis\": [ {{id, name, short_description, chart_type, d3_chart, expected_schema, sql }} , ... ] }}"
+    "Return value: JSON object: {{ \"kpis\": [ {{id, name, short_description, chart_type, d3_chart, expected_schema, sql, engine?, vega_lite_spec? }} , ... ] }}"
 )
 
 
@@ -139,10 +140,19 @@ class KPIService:
                 if self.kpi_fallback_enabled:
                     all_items.extend(self._fallback_kpis_for_table(t.datasetId, t.tableId, k))
                     continue
-                # Log and continue to next table instead of failing the whole request
                 print(f"KPI LLM error for {t.datasetId}.{t.tableId}: {exc}")
                 continue
             table_slug = f"{t.datasetId}.{t.tableId}"
+            # Attempt to infer a reasonable date column from schema for filtering
+            date_col = None
+            try:
+                schema = self.bq.get_table_schema(t.datasetId, t.tableId)
+                for c in schema:
+                    if c.get('type') in ('DATE','TIMESTAMP','DATETIME'):
+                        date_col = c['name']
+                        break
+            except Exception:
+                pass
             count = 0
             for item in (result.get("kpis") or []):
                 if count >= k:
@@ -161,6 +171,9 @@ class KPIService:
                         d3_chart=item.get("d3_chart", ""),
                         expected_schema=expected_schema,
                         sql=sql,
+                        engine=item.get("engine", "vega-lite" if item.get("vega_lite_spec") else None),
+                        vega_lite_spec=item.get("vega_lite_spec"),
+                        filter_date_column=item.get("filter_date_column") or date_col,
                     )
                 )
                 count += 1
