@@ -1,9 +1,12 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { TableSelector } from '../ui/TableSelector'
 import { KPIList } from '../ui/KPIList'
 import { ChartCanvas } from '../ui/ChartCanvas'
 import { api } from '../services/api'
 import '../styles.css'
+import GridLayout, { Layout } from 'react-grid-layout'
+import 'react-grid-layout/css/styles.css'
+import 'react-resizable/css/styles.css'
 
 export default function App() {
 	const [datasets, setDatasets] = useState<any[]>([])
@@ -35,6 +38,11 @@ export default function App() {
 		setRowsByKpi(prev => ({...prev, [kpi.id]: res}))
 	}
 
+	const layout: Layout[] = useMemo(() => {
+		// default 2 columns layout that can be rearranged/resized by user
+		return kpis.map((k, i) => ({ i: k.id, x: (i % 2) * 6, y: Math.floor(i / 2) * 8, w: 6, h: 8 }))
+	}, [kpis])
+
 	return (
 		<div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 16, padding: 16 }}>
 			<div>
@@ -48,25 +56,37 @@ export default function App() {
 				<button onClick={onAnalyze} disabled={!selected.length || loading} style={{ marginTop: 8 }}>
 					{loading ? 'Analyzing...' : `Analyze (${selected.length})`}
 				</button>
+				<div style={{ marginTop: 16 }}>
+					<h3>KPIs</h3>
+					<KPIList kpis={kpis} onRun={runKpi} />
+				</div>
 			</div>
 			<div>
-				<h3>KPIs</h3>
-				<KPIList kpis={kpis} onRun={runKpi} />
-				<div style={{ marginTop: 16 }}>
-					<h3>Charts</h3>
+				<h3>Dashboard</h3>
+				<GridLayout
+					className="layout"
+					layout={layout}
+					cols={12}
+					rowHeight={30}
+					width={1000}
+					isResizable
+					isDraggable
+				>
 					{kpis.map(k => (
-						<div key={k.id} style={{ border: '1px solid #ddd', padding: 8, marginBottom: 12 }}>
-							<div style={{ display: 'flex', justifyContent: 'space-between' }}>
+						<div key={k.id} data-grid={layout.find(l => l.i === k.id)} style={{ border: '1px solid #ddd', background: '#fff', display: 'flex', flexDirection: 'column' }}>
+							<div style={{ padding: 8, display: 'flex', justifyContent: 'space-between', cursor: 'move' }}>
 								<div>
 									<div style={{ fontWeight: 600 }}>{k.name}</div>
-									<div style={{ color: '#666' }}>{k.short_description}</div>
+									<div style={{ color: '#666', fontSize: 12 }}>{k.short_description}</div>
 								</div>
-								<button onClick={() => runKpi(k)}>Run</button>
+								<button onClick={() => runKpi(k)} style={{ fontSize: 12 }}>Run</button>
 							</div>
-							<ChartCanvas chart={k} rows={rowsByKpi[k.id] || []} />
+							<div style={{ flex: 1, padding: 8 }}>
+								<ChartCanvas chart={k} rows={rowsByKpi[k.id] || []} />
+							</div>
 						</div>
 					))}
-				</div>
+				</GridLayout>
 			</div>
 		</div>
 	)
