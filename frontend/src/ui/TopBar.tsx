@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 
 export function TopBar({
   name,
@@ -31,6 +31,7 @@ export function TopBar({
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(name)
+  useEffect(() => { setDraft(name) }, [name])
 
   const startEdit = () => { setDraft(name); setEditing(true) }
   const commit = () => { setEditing(false); if (draft !== name) onNameChange(draft) }
@@ -52,15 +53,15 @@ export function TopBar({
             style={{ fontSize: 16, fontWeight: 600 }}
           />
         ) : (
-          <span className="chip" style={{ fontSize: 16, fontWeight: 700, cursor: 'text' }} onDoubleClick={startEdit} title="Double-click to rename">{name}</span>
+          <span className="name-badge" style={{ cursor: 'text' }} onDoubleClick={startEdit} title="Double-click to rename">{name || 'Untitled'}</span>
         )}
         {version && <span className="badge">v{version}</span>}
-        {dirty && (
+        {dirty ? (
           <>
             <button className="btn btn-primary" onClick={onSave}>Save</button>
             <button className="btn btn-ghost" onClick={onSaveAs}>Save As</button>
           </>
-        )}
+        ) : null}
       </div>
       <div className="toolbar" style={{ alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
