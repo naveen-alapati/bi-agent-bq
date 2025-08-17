@@ -17,10 +17,11 @@ SYSTEM_PROMPT_TEMPLATE = (
     "- d3_chart (a short suggestion: e.g. \"d3.line() with x=date, y=value\", or \"d3.bar() with label,value\"), "
     "- expected_schema (one of: timeseries {{x:DATE|TIMESTAMP or STRING, y:NUMBER}}, categorical {{label:STRING, value:NUMBER}}, distribution {{label, value}}), "
     "- sql (BigQuery standard SQL) — this SQL must be ready-to-run and must return columns that match expected_schema. "
+    "- Optional: engine (e.g., 'vega-lite') and vega_lite_spec (valid Vega-Lite JSON spec using the same field names), if helpful. "
     "Use the table reference exactly as `project.dataset.table`. If using aggregation, alias columns exactly to x,y or label,value depending on expected_schema. "
     "Keep SQL simple and efficient (use LIMIT where useful). Use safe handling for NULLs. "
     "INPUT_DATA is a JSON object. "
-    "Return value: JSON object: {{ \"kpis\": [ {{id, name, short_description, chart_type, d3_chart, expected_schema, sql }} , ... ] }}"
+    "Return value: JSON object: {{ \"kpis\": [ {{id, name, short_description, chart_type, d3_chart, expected_schema, sql, engine?, vega_lite_spec? }} , ... ] }}"
 )
 
 
@@ -161,6 +162,8 @@ class KPIService:
                         d3_chart=item.get("d3_chart", ""),
                         expected_schema=expected_schema,
                         sql=sql,
+                        engine=item.get("engine"),
+                        vega_lite_spec=item.get("vega_lite_spec"),
                     )
                 )
                 count += 1

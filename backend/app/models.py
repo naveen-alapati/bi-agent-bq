@@ -58,6 +58,8 @@ class KPIItem(BaseModel):
     d3_chart: str
     expected_schema: str
     sql: str
+    engine: Optional[str] = None
+    vega_lite_spec: Optional[Dict[str, Any]] = None
 
 
 class GenerateKpisResponse(BaseModel):

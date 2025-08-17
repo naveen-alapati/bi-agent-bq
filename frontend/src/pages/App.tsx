@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { TableSelector } from '../ui/TableSelector'
 import { KPIList } from '../ui/KPIList'
 import { ChartCanvas } from '../ui/ChartCanvas'
+import { ChartRenderer } from '../ui/ChartRenderer'
 import { api } from '../services/api'
 import '../styles.css'
 import GridLayout, { Layout, Layouts } from 'react-grid-layout'
@@ -127,7 +128,7 @@ export default function App() {
 								<button onClick={() => runKpi(k)} style={{ fontSize: 12 }}>Run</button>
 							</div>
 							<div style={{ flex: 1, padding: 8 }}>
-								<ChartCanvas chart={k} rows={rowsByKpi[k.id] || []} />
+								<ChartRenderer chart={k} rows={rowsByKpi[k.id] || []} />
 							</div>
 						</div>
 					))}
