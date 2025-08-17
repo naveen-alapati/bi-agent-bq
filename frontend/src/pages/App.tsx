@@ -418,52 +418,50 @@ export default function App() {
         )}
 
         <div style={{ display: 'grid', gap: 12 }} ref={gridWrapRef}>
-          <div className="section-title">Dashboard
-            {version && <span className="chip" style={{ marginLeft: 8 }}>v{version}</span>}
+          <div className="section-title">Dashboard {version && <span className="chip" style={{ marginLeft: 8 }}>v{version}</span>}
             <button className="btn btn-sm" style={{ marginLeft: 'auto', background: '#239BA7', color: '#fff', borderColor: '#239BA7' }} onClick={async () => {
               try {
                 const list = await api.listDashboards()
                 const current = list.find((d:any) => d.name === dashboardName && d.version === version)
-                if (current?.id) {
-                  await api.setDefaultDashboard(current.id)
-                  toast('success', 'Set as default dashboard')
-                } else {
-                  toast('error', 'Save the dashboard first to set as default')
-                }
-              } catch (e:any) {
-                toast('error', e?.message || 'Failed to set default')
-              }
+                if (current?.id) { await api.setDefaultDashboard(current.id); toast('success','Set as default dashboard') } else { toast('error','Save first') }
+              } catch(e:any){ toast('error', e?.message||'Failed') }
             }}>Default</button>
           </div>
-          <div className="toolbar" style={{ marginBottom: 8 }}>
-            {tabs.sort((a,b)=>a.order-b.order).map((t, idx) => (
-              <button
-                key={t.id}
-                className="btn btn-sm"
-                style={{ background: t.id===activeTab? colorForTab(t.id, idx):'', color: t.id===activeTab? '#0b1220': undefined, borderColor: t.id===activeTab? colorForTab(t.id, idx):'' }}
-                onClick={() => setActiveTab(t.id)}
-                draggable
-                onDragStart={(e) => onDragStartTab(t.id, e)}
-                onDragOver={onDragOverTab}
-                onDrop={(e) => onDropTab(t.id, e)}
-                onDoubleClick={() => startEditTab(t)}
-              >
-                {editingTabId === t.id ? (
-                  <input
-                    className="input"
-                    value={editingTabName}
-                    onChange={e => setEditingTabName(e.target.value)}
-                    autoFocus
-                    onBlur={commitEditTab}
-                    onKeyDown={e => { if (e.key === 'Enter') commitEditTab(); if (e.key === 'Escape') cancelEditTab() }}
-                    onClick={e => e.stopPropagation()}
-                    style={{ maxWidth: 120 }}
-                  />
-                ) : (
-                  <span>{t.name}</span>
-                )}
-              </button>
-            ))}
+
+          <div className="tabs-bar">
+            <button className="tab-arrow" onClick={() => { const el = document.getElementById('tabs-scroll'); if (el) el.scrollBy({ left: -160, behavior: 'smooth' }) }}>❮</button>
+            <div id="tabs-scroll" className="tabs-scroll">
+              {tabs.sort((a,b)=>a.order-b.order).map((t, idx) => (
+                <div
+                  key={t.id}
+                  className={`tab-pill ${t.id===activeTab ? 'active' : ''}`}
+                  style={{ borderColor: t.id===activeTab? colorForTab(t.id, idx): undefined, background: t.id===activeTab? colorForTab(t.id, idx): undefined, color: t.id===activeTab? '#fff': undefined }}
+                  onClick={() => setActiveTab(t.id)}
+                  draggable
+                  onDragStart={(e) => onDragStartTab(t.id, e)}
+                  onDragOver={onDragOverTab}
+                  onDrop={(e) => onDropTab(t.id, e)}
+                  onDoubleClick={() => startEditTab(t)}
+                  title="Drag to reorder. Double-click to rename."
+                >
+                  {editingTabId === t.id ? (
+                    <input
+                      className="input"
+                      value={editingTabName}
+                      onChange={e => setEditingTabName(e.target.value)}
+                      autoFocus
+                      onBlur={commitEditTab}
+                      onKeyDown={e => { if (e.key === 'Enter') commitEditTab(); if (e.key === 'Escape') cancelEditTab() }}
+                      onClick={e => e.stopPropagation()}
+                      style={{ maxWidth: 160 }}
+                    />
+                  ) : (
+                    <span>{t.name}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button className="tab-arrow" onClick={() => { const el = document.getElementById('tabs-scroll'); if (el) el.scrollBy({ left: 160, behavior: 'smooth' }) }}>❯</button>
             <button className="btn btn-sm" onClick={addTab}>+ Tab</button>
             {activeTab !== 'overview' && <button className="btn btn-sm" onClick={() => { removeTab(activeTab); setDirty(true) }}>Delete Tab</button>}
           </div>
