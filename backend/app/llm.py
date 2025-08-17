@@ -47,6 +47,15 @@ class LLMClient:
         text = resp.choices[0].message.content
         return json.loads(text)
 
+    def _parse_json_text(self, text: str) -> Dict[str, Any]:
+        s = text.strip()
+        # strip code fences if present
+        if s.startswith("```"):
+            s = s.strip('`')
+            if s.startswith("json"):
+                s = s[4:].strip()
+        return json.loads(s)
+
     def _generate_gemini(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         if not self.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY must be set when LLM_PROVIDER=gemini")
@@ -65,13 +74,13 @@ class LLMClient:
                 "responseMimeType": "application/json"
             }
         }
-        resp = requests.post(f"{endpoint}?key={self.gemini_api_key}", headers=headers, data=json.dumps(body), timeout=60)
+        resp = requests.post(f"{endpoint}?key={self.gemini_api_key}", headers=headers, data=json.dumps(body), timeout=20)
         if resp.status_code != 200:
             raise RuntimeError(f"Gemini API error {resp.status_code}: {resp.text}")
         data = resp.json()
         try:
             text = data["candidates"][0]["content"]["parts"][0]["text"]
-            return json.loads(text)
+            return self._parse_json_text(text)
         except Exception as exc:
             raise RuntimeError(f"Failed to parse Gemini response: {data}") from exc
 
@@ -97,7 +106,7 @@ class LLMClient:
                     "contents": [{"role": "user", "parts": [{"text": "{\"ok\":true}"}]}],
                     "generationConfig": {"responseMimeType": "application/json"}
                 }
-                resp = requests.post(f"{endpoint}?key={self.gemini_api_key}", headers=headers, data=json.dumps(body), timeout=30)
+                resp = requests.post(f"{endpoint}?key={self.gemini_api_key}", headers=headers, data=json.dumps(body), timeout=10)
                 if resp.status_code != 200:
                     return {"provider": "gemini", "ok": False, "status": resp.status_code, "error": resp.text}
                 return {"provider": "gemini", "ok": True, "raw": resp.text}
