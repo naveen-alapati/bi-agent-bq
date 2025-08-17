@@ -265,7 +265,6 @@ class BigQueryService:
         ]
 
     def ensure_dashboards_table(self, dataset_id: str = "analytics_dash", table: str = "dashboards") -> str:
-        # schema: id STRING, name STRING, kpis JSON, layout JSON, selected_tables JSON, created_at TIMESTAMP, updated_at TIMESTAMP
         self.ensure_dataset(dataset_id)
         table_fqn = f"{self.project_id}.{dataset_id}.{table}"
         try:
@@ -274,9 +273,9 @@ class BigQueryService:
             schema = [
                 bigquery.SchemaField("id", "STRING"),
                 bigquery.SchemaField("name", "STRING"),
-                bigquery.SchemaField("kpis", "JSON"),
-                bigquery.SchemaField("layout", "JSON"),
-                bigquery.SchemaField("selected_tables", "JSON"),
+                bigquery.SchemaField("kpis", "STRING"),
+                bigquery.SchemaField("layout", "STRING"),
+                bigquery.SchemaField("selected_tables", "STRING"),
                 bigquery.SchemaField("created_at", "TIMESTAMP"),
                 bigquery.SchemaField("updated_at", "TIMESTAMP"),
             ]
@@ -287,7 +286,7 @@ class BigQueryService:
     def save_dashboard(self, name: str, kpis: List[Dict[str, Any]], layout: List[Dict[str, Any]], selected_tables: List[Dict[str, Any]], dashboard_id: Optional[str] = None, dataset_id: str = "analytics_dash") -> str:
         table = self.ensure_dashboards_table(dataset_id)
         did = dashboard_id or uuid.uuid4().hex
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc)
         # Delete existing if present
         try:
             self.client.query(
@@ -300,14 +299,15 @@ class BigQueryService:
         row = {
             "id": did,
             "name": name,
-            "kpis": kpis,
-            "layout": layout,
-            "selected_tables": selected_tables,
-            "created_at": now,
-            "updated_at": now,
+            "kpis": json.dumps(kpis),
+            "layout": json.dumps(layout),
+            "selected_tables": json.dumps(selected_tables),
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
         }
         errors = self.client.insert_rows_json(table, [row])
         if errors:
+            print(f"Dashboard save errors: {errors}")
             raise RuntimeError(f"Failed to save dashboard: {errors}")
         return did
 
@@ -326,12 +326,10 @@ class BigQueryService:
             return None
         row = dict(rows[0])
         def parse_json_field(val: Any) -> Any:
-            if isinstance(val, str):
-                try:
-                    return json.loads(val)
-                except Exception:
-                    return val
-            return val
+            try:
+                return json.loads(val)
+            except Exception:
+                return val
         return {
             "id": row["id"],
             "name": row["name"],
