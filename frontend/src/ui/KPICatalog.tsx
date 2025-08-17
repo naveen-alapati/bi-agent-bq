@@ -24,20 +24,20 @@ export function KPICatalog({ onAdd }: { onAdd: (item: any) => void }) {
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-        <input placeholder="datasetId" value={datasetId} onChange={e => setDatasetId(e.target.value)} />
-        <input placeholder="tableId" value={tableId} onChange={e => setTableId(e.target.value)} />
-        <input placeholder="search..." value={q} onChange={e => setQ(e.target.value)} style={{ flex: 1 }} />
-        <button onClick={load}>Refresh</button>
+      <div className="toolbar" style={{ marginBottom: 8 }}>
+        <input className="input" placeholder="datasetId" value={datasetId} onChange={e => setDatasetId(e.target.value)} />
+        <input className="input" placeholder="tableId" value={tableId} onChange={e => setTableId(e.target.value)} />
+        <input className="input" placeholder="search..." value={q} onChange={e => setQ(e.target.value)} style={{ flex: 1 }} />
+        <button className="btn" onClick={load}>Refresh</button>
       </div>
-      <div style={{ maxHeight: 320, overflow: 'auto', border: '1px solid #eee', padding: 6 }}>
+      <div className="scroll">
         {filtered.map(it => (
-          <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f2f2f2', padding: '6px 0' }}>
+          <div key={it.id} className="list-item">
             <div>
-              <div style={{ fontWeight: 600 }}>{it.name}</div>
-              <div style={{ color: '#666', fontSize: 12 }}>{it.dataset_id}.{it.table_id}</div>
+              <div className="card-title">{it.name}</div>
+              <div className="card-subtitle">{it.dataset_id}.{it.table_id}</div>
             </div>
-            <button onClick={() => onAdd(it)}>Add</button>
+            <button className="btn btn-sm" onClick={() => onAdd(it)}>Add</button>
           </div>
         ))}
       </div>

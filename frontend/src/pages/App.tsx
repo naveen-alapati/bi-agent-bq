@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState, useRef } from 'react'
 import { TableSelector } from '../ui/TableSelector'
 import { KPIList } from '../ui/KPIList'
 import { ChartRenderer } from '../ui/ChartRenderer'
@@ -25,12 +25,27 @@ export default function App() {
   const [globalDate, setGlobalDate] = useState<{from?: string, to?: string}>({})
   const [crossFilter, setCrossFilter] = useState<any>(null)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const gridWrapRef = useRef<HTMLDivElement | null>(null)
+  const [gridW, setGridW] = useState<number>(1000)
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+  }, [theme])
 
   useEffect(() => {
     setLoadError('')
     api.getDatasets().then(setDatasets).catch(() => setLoadError('Failed to fetch datasets. Ensure the Cloud Run service account has BigQuery list permissions.'))
     api.listDashboards().then(setDashList).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    const el = gridWrapRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setGridW(el.clientWidth))
+    ro.observe(el)
+    setGridW(el.clientWidth)
+    return () => ro.disconnect()
+  }, [gridWrapRef.current])
 
   async function onAnalyze() {
     if (!selected.length) return
@@ -39,7 +54,6 @@ export default function App() {
       await api.prepare(selected, 5)
       const kpisResp = await api.generateKpis(selected, 5)
       setKpis(kpisResp)
-      // auto-store generated KPIs in catalog
       for (const sel of selected) {
         const perTable = kpisResp.filter(k => (k.id || '').startsWith(`${sel.datasetId}.${sel.tableId}:`))
         if (perTable.length) {
@@ -54,7 +68,6 @@ export default function App() {
   async function runKpi(kpi: any) {
     const filters = {
       date: globalDate,
-      // categorical crossFilter wiring placeholder
     }
     const res = await api.runKpi(kpi.sql, filters, kpi.filter_date_column, kpi.expected_schema)
     setRowsByKpi(prev => ({...prev, [kpi.id]: res}))
@@ -73,7 +86,7 @@ export default function App() {
     setSaving(true)
     try {
       const payload = {
-        id: asNew ? undefined : undefined, // new id when Save As; leave undefined for auto
+        id: asNew ? undefined : undefined,
         name: dashboardName,
         version: asNew ? '1.0.0' : undefined,
         kpis,
@@ -105,7 +118,6 @@ export default function App() {
   }
 
   function addKpiToCanvas(item: any) {
-    // convert catalog item to KPI card shape
     const id = `${item.dataset_id}.${item.table_id}:${item.id}`
     const k: any = {
       id,
@@ -137,35 +149,36 @@ export default function App() {
         onExportDashboard={exportDashboard}
       />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 16, padding: 16 }}>
-        <div>
-          <h3>Data</h3>
-          {loadError && <div style={{ color: 'crimson', marginBottom: 8 }}>{loadError}</div>}
-          {datasets.length === 0 ? (
-            <div style={{ color: '#666' }}>No datasets found. Verify IAM and BigQuery project.</div>
-          ) : (
-            <TableSelector datasets={datasets} onChange={setSelected} />
-          )}
-          <button onClick={onAnalyze} disabled={!selected.length || loading} style={{ marginTop: 8 }}>
-            {loading ? 'Analyzing...' : `Analyze (${selected.length})`}
-          </button>
+      <div className="app-grid">
+        <div className="sidebar" style={{ display: 'grid', gap: 12 }}>
+          <div className="panel">
+            <div className="section-title">Data</div>
+            {loadError && <div className="badge" style={{ marginBottom: 8, borderColor: 'crimson', color: 'crimson', background: 'rgba(220,20,60,0.06)' }}>{loadError}</div>}
+            {datasets.length === 0 ? (
+              <div className="card-subtitle">No datasets found. Verify IAM and BigQuery project.</div>
+            ) : (
+              <TableSelector datasets={datasets} onChange={setSelected} />
+            )}
+            <button className="btn btn-primary" onClick={onAnalyze} disabled={!selected.length || loading} style={{ marginTop: 8 }}>
+              {loading ? 'Analyzing...' : `Analyze (${selected.length})`}
+            </button>
+          </div>
 
-          <div style={{ marginTop: 16 }}>
-            <h3>KPI Catalog</h3>
+          <div className="panel">
+            <div className="section-title">KPI Catalog</div>
             <KPICatalog onAdd={addKpiToCanvas} />
           </div>
 
-          <div style={{ marginTop: 16 }}>
-            <h3>Dashboards</h3>
+          <div className="panel">
+            <div className="section-title">Dashboards</div>
             <div style={{ marginTop: 8 }}>
-              <select onChange={e => {
+              <select className="select" onChange={e => {
                 const id = e.target.value
                 if (!id) return
                 api.getDashboard(id).then(d => {
                   setDashboardName(d.name)
                   setVersion(d.version || '')
                   setKpis(d.kpis)
-                  // prefer single layout if present, else try layouts.lg
                   const nextLayout = (d.layout && d.layout.length ? d.layout : (d.layouts && (d.layouts['lg'] || d.layouts['md'] || d.layouts['sm']) || [])) as Layout[]
                   setLayouts(nextLayout)
                   setSelected(d.selected_tables)
@@ -173,7 +186,7 @@ export default function App() {
                   const mode = (d.theme && (d.theme.mode as any)) || 'light'
                   setTheme(mode === 'dark' ? 'dark' : 'light')
                 })
-              }} style={{ width: '100%' }}>
+              }}>
                 <option value="">Load existing...</option>
                 {dashList.map(d => (
                   <option key={d.id} value={d.id}>{d.name} (v{d.version})</option>
@@ -183,14 +196,14 @@ export default function App() {
           </div>
         </div>
 
-        <div>
-          <h3>Dashboard</h3>
+        <div style={{ display: 'grid', gap: 12 }} ref={gridWrapRef}>
+          <div className="section-title">Dashboard</div>
           <GridLayout
             className="layout"
             layout={layouts}
             cols={12}
             rowHeight={30}
-            width={1000}
+            width={gridW}
             isResizable
             isDraggable
             draggableHandle=".drag-handle"
@@ -198,23 +211,23 @@ export default function App() {
             onLayoutChange={onLayoutChange}
           >
             {kpis.map(k => (
-              <div key={k.id} data-grid={layouts.find(l => l.i === k.id)} style={{ border: '1px solid #ddd', background: '#fff', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ padding: 8, display: 'flex', justifyContent: 'space-between' }}>
+              <div key={k.id} data-grid={layouts.find(l => l.i === k.id)} className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+                <div className="card-header">
                   <div className="drag-handle">
-                    <div style={{ fontWeight: 600 }}>{k.name}</div>
-                    <div style={{ color: '#666', fontSize: 12 }}>{k.short_description}</div>
+                    <div className="card-title">{k.name}</div>
+                    <div className="card-subtitle">{k.short_description}</div>
                   </div>
-                  <div style={{ display: 'flex', gap: 6 }} className="no-drag">
-                    <button onClick={() => runKpi(k)} style={{ fontSize: 12 }}>Run</button>
-                    <button onClick={() => window.alert(k.sql)} style={{ fontSize: 12 }}>View SQL</button>
-                    <button onClick={async () => {
+                  <div className="card-actions no-drag">
+                    <button className="btn btn-sm" onClick={() => runKpi(k)}>Run</button>
+                    <button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
+                    <button className="btn btn-sm" onClick={async () => {
                       const instruction = prompt('Edit instruction (e.g., group by month, limit 12)')
                       if (!instruction) return
                       const res = await fetch('/api/sql/edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql: k.sql, instruction }) }).then(r => r.json())
                       k.sql = res.sql
                       setKpis([...kpis])
-                    }} style={{ fontSize: 12 }}>Edit SQL</button>
-                    <button onClick={async () => {
+                    }}>Edit SQL</button>
+                    <button className="btn btn-sm" onClick={async () => {
                       const r = await fetch('/api/export/card', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql: k.sql }) })
                       const blob = await r.blob()
                       const url = URL.createObjectURL(blob)
@@ -223,7 +236,7 @@ export default function App() {
                       a.download = `${k.name || 'card'}.csv`
                       a.click()
                       URL.revokeObjectURL(url)
-                    }} style={{ fontSize: 12 }}>Export</button>
+                    }}>Export</button>
                   </div>
                 </div>
                 <div style={{ flex: 1, padding: 8 }} className="no-drag">
