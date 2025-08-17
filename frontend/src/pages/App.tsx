@@ -221,7 +221,20 @@ export default function App() {
         )}
 
         <div style={{ display: 'grid', gap: 12 }} ref={gridWrapRef}>
-          <div className="section-title">Dashboard</div>
+          <div className="section-title">Dashboard
+            {version && <span className="chip" style={{ marginLeft: 8 }}>v{version}</span>}
+            <button className="btn btn-sm" style={{ marginLeft: 'auto' }} onClick={async () => {
+              // mark this as default
+              const list = await api.listDashboards()
+              const current = list.find((d:any) => d.name === dashboardName && d.version === version)
+              if (current?.id) {
+                await api.setDefaultDashboard(current.id)
+                alert('Set as default dashboard')
+              } else {
+                alert('Save the dashboard first to set as default')
+              }
+            }}>Set as Default</button>
+          </div>
           <GridLayout
             className="layout"
             layout={layouts}
@@ -242,15 +255,28 @@ export default function App() {
                     <div className="card-subtitle">{k.short_description}</div>
                   </div>
                   <div className="card-actions no-drag">
-                    <button className="btn btn-sm" onClick={() => runKpi(k)}>Run</button>
+                    <button className="btn btn-sm" onClick={() => runKpi(k)}>Test</button>
                     <button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
                     <button className="btn btn-sm" onClick={async () => {
-                      const instruction = prompt('Edit instruction (e.g., group by month, limit 12)')
+                      const instruction = prompt('AI Edit: describe the change (e.g., change chart to bar by category, rename axis, limit 12)')
                       if (!instruction) return
-                      const res = await fetch('/api/sql/edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql: k.sql, instruction }) }).then(r => r.json())
-                      k.sql = res.sql
-                      setKpis([...kpis])
-                    }}>Edit SQL</button>
+                      const updated = await api.editKpi(k, instruction)
+                      // merge updated fields into this KPI
+                      const idx = kpis.findIndex(x => x.id === k.id)
+                      if (idx >= 0) {
+                        const next = [...kpis]
+                        next[idx] = { ...next[idx], ...updated }
+                        setKpis(next)
+                        // also persist to KPI catalog
+                        try {
+                          const prefix = (k.id || '').split(':')[0]
+                          const [ds, tb] = prefix.split('.')
+                          if (ds && tb) {
+                            await api.addToKpiCatalog(ds, tb, [next[idx]])
+                          }
+                        } catch {}
+                      }
+                    }}>AI Edit</button>
                     <button className="btn btn-sm" onClick={async () => {
                       const r = await fetch('/api/export/card', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql: k.sql }) })
                       const blob = await r.blob()

@@ -40,5 +40,17 @@ export const api = {
   async listKpiCatalog(params?: { datasetId?: string, tableId?: string }) {
     const r = await axios.get('/api/kpi_catalog', { params })
     return r.data.items
+  },
+  async editKpi(kpi: any, instruction: string) {
+    const r = await axios.post('/api/kpi/edit', { kpi, instruction })
+    return r.data.kpi
+  },
+  async setDefaultDashboard(id: string) {
+    const r = await axios.post('/api/dashboards/default', { id })
+    return r.data
+  },
+  async getDefaultDashboard() {
+    const r = await axios.get('/api/dashboards/default')
+    return r.data.id as string | null
   }
 }
