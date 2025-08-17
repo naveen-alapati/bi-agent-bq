@@ -1,11 +1,14 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import os
 from datetime import datetime
+import csv
+import io
+import zipfile
 
 from .bq import BigQueryService
 from .embeddings import EmbeddingMode, EmbeddingService
@@ -137,6 +140,60 @@ def run_kpi(req: RunKpiRequest):
 		return {"rows": rows}
 	except Exception as exc:
 		raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/sql/edit")
+def edit_sql(payload: Dict[str, str]):
+	try:
+		original_sql = payload.get('sql', '')
+		instruction = payload.get('instruction', '')
+		new_sql = kpi_service.llm.edit_sql(original_sql, instruction)
+		return {"sql": new_sql}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/export/card")
+def export_card(payload: Dict[str, Any]):
+	try:
+		sql = payload.get('sql', '')
+		rows = bq_service.query_rows(sql)
+		# CSV export
+		output = io.StringIO()
+		writer = None
+		for r in rows:
+			if writer is None:
+				writer = csv.DictWriter(output, fieldnames=list(r.keys()))
+				writer.writeheader()
+			writer.writerow(r)
+		output.seek(0)
+		return StreamingResponse(iter([output.getvalue()]), media_type='text/csv', headers={'Content-Disposition': 'attachment; filename="card.csv"'})
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/export/dashboard")
+def export_dashboard(payload: Dict[str, Any]):
+	try:
+		kpis = payload.get('kpis', [])
+		archive = io.BytesIO()
+		with zipfile.ZipFile(archive, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
+			for i, k in enumerate(kpis):
+				sql = k.get('sql', '')
+				rows = bq_service.query_rows(sql)
+				csv_buf = io.StringIO()
+				writer = None
+				for r in rows:
+					if writer is None:
+						writer = csv.DictWriter(csv_buf, fieldnames=list(r.keys()))
+						writer.writeheader()
+					writer.writerow(r)
+				csv_content = csv_buf.getvalue()
+				zf.writestr(f"card_{i+1}.csv", csv_content)
+		archive.seek(0)
+		return StreamingResponse(archive, media_type='application/zip', headers={'Content-Disposition': 'attachment; filename="dashboard.zip"'})
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/selftest")
