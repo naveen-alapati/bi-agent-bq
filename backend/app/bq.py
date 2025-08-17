@@ -4,8 +4,9 @@ from google.api_core.exceptions import NotFound, Conflict
 import json
 import os
 import re
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
+import uuid
 
 
 class BigQueryService:
@@ -262,3 +263,86 @@ class BigQueryService:
             {"object_ref": r["object_ref"], "content": r["content"], "dist": float(r["dist"]) if r["dist"] is not None else None}
             for r in results
         ]
+
+    def ensure_dashboards_table(self, dataset_id: str = "analytics_dash", table: str = "dashboards") -> str:
+        # schema: id STRING, name STRING, kpis JSON, layout JSON, selected_tables JSON, created_at TIMESTAMP, updated_at TIMESTAMP
+        self.ensure_dataset(dataset_id)
+        table_fqn = f"{self.project_id}.{dataset_id}.{table}"
+        try:
+            self.client.get_table(table_fqn)
+        except NotFound:
+            schema = [
+                bigquery.SchemaField("id", "STRING"),
+                bigquery.SchemaField("name", "STRING"),
+                bigquery.SchemaField("kpis", "JSON"),
+                bigquery.SchemaField("layout", "JSON"),
+                bigquery.SchemaField("selected_tables", "JSON"),
+                bigquery.SchemaField("created_at", "TIMESTAMP"),
+                bigquery.SchemaField("updated_at", "TIMESTAMP"),
+            ]
+            table_obj = bigquery.Table(table_fqn, schema=schema)
+            self.client.create_table(table_obj)
+        return table_fqn
+
+    def save_dashboard(self, name: str, kpis: List[Dict[str, Any]], layout: List[Dict[str, Any]], selected_tables: List[Dict[str, Any]], dashboard_id: Optional[str] = None, dataset_id: str = "analytics_dash") -> str:
+        table = self.ensure_dashboards_table(dataset_id)
+        did = dashboard_id or uuid.uuid4().hex
+        now = datetime.now(timezone.utc).isoformat()
+        row = {
+            "id": did,
+            "name": name,
+            "kpis": json.dumps(kpis),
+            "layout": json.dumps(layout),
+            "selected_tables": json.dumps(selected_tables),
+            "created_at": now,
+            "updated_at": now,
+        }
+        # Use MERGE semantics via DML
+        sql = f"""
+        MERGE `{table}` T
+        USING (SELECT @id AS id, @name AS name, @kpis AS kpis, @layout AS layout, @selected AS selected_tables, @created AS created_at, @updated AS updated_at) S
+        ON T.id = S.id
+        WHEN MATCHED THEN UPDATE SET name=S.name, kpis=S.kpis, layout=S.layout, selected_tables=S.selected_tables, updated_at=S.updated
+        WHEN NOT MATCHED THEN INSERT (id,name,kpis,layout,selected_tables,created_at,updated_at) VALUES (S.id,S.name,S.kpis,S.layout,S.selected_tables,S.created_at,S.updated_at)
+        """
+        job = self.client.query(
+            sql,
+            job_config=bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("id", "STRING", did),
+                    bigquery.ScalarQueryParameter("name", "STRING", name),
+                    bigquery.ScalarQueryParameter("kpis", "JSON", row["kpis"]),
+                    bigquery.ScalarQueryParameter("layout", "JSON", row["layout"]),
+                    bigquery.ScalarQueryParameter("selected", "JSON", row["selected_tables"]),
+                    bigquery.ScalarQueryParameter("created", "TIMESTAMP", now),
+                    bigquery.ScalarQueryParameter("updated", "TIMESTAMP", now),
+                ]
+            ),
+            location=self.location,
+        )
+        job.result()
+        return did
+
+    def list_dashboards(self, dataset_id: str = "analytics_dash") -> List[Dict[str, Any]]:
+        table = self.ensure_dashboards_table(dataset_id)
+        sql = f"SELECT id, name, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at FROM `{table}` ORDER BY updated_at DESC"
+        rows = [dict(r) for r in self.client.query(sql, location=self.location)]
+        return rows
+
+    def get_dashboard(self, dashboard_id: str, dataset_id: str = "analytics_dash") -> Optional[Dict[str, Any]]:
+        table = self.ensure_dashboards_table(dataset_id)
+        sql = f"SELECT id, name, kpis, layout, selected_tables, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at FROM `{table}` WHERE id=@id LIMIT 1"
+        job = self.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", dashboard_id)]), location=self.location)
+        rows = list(job)
+        if not rows:
+            return None
+        row = dict(rows[0])
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "kpis": json.loads(row["kpis"]),
+            "layout": json.loads(row["layout"]),
+            "selected_tables": json.loads(row["selected_tables"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
