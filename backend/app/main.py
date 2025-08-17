@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import os
+from datetime import datetime
 
 from .bq import BigQueryService
 from .embeddings import EmbeddingMode, EmbeddingService
@@ -105,7 +106,32 @@ def generate_kpis(req: GenerateKpisRequest):
 @app.post("/api/run_kpi", response_model=RunKpiResponse)
 def run_kpi(req: RunKpiRequest):
 	try:
-		rows = bq_service.query_rows(req.sql)
+		sql = req.sql
+		params = []
+		where_clauses = []
+		# apply date filter if provided
+		if req.date_column and req.filters and req.filters.get('date'):
+			date_filter = req.filters['date']
+			if date_filter.get('from'):
+				where_clauses.append(f"{req.date_column} >= @fromDate")
+				params.append(BigQueryService.bigquery.ScalarQueryParameter("fromDate", "DATE", date_filter['from']))
+			if date_filter.get('to'):
+				where_clauses.append(f"{req.date_column} <= @toDate")
+				params.append(BigQueryService.bigquery.ScalarQueryParameter("toDate", "DATE", date_filter['to']))
+		# apply categorical cross-filter if provided
+		if req.filters and req.filters.get('category') and isinstance(req.filters['category'], dict):
+			cat = req.filters['category']
+			col = cat.get('column')
+			val = cat.get('value')
+			if col and val is not None:
+				where_clauses.append(f"{col} = @catValue")
+				params.append(BigQueryService.bigquery.ScalarQueryParameter("catValue", "STRING", str(val)))
+		if where_clauses:
+			wrapped = f"SELECT * FROM ( {sql} ) WHERE " + " AND ".join(where_clauses)
+			rows = bq_service.client.query(wrapped, job_config=BigQueryService.bigquery.QueryJobConfig(query_parameters=params), location=bq_service.location)
+			result_rows = [dict(r) for r in rows]
+			return {"rows": bq_service._normalize_value(result_rows)}
+		rows = bq_service.query_rows(sql)
 		return {"rows": rows}
 	except Exception as exc:
 		raise HTTPException(status_code=400, detail=str(exc))

@@ -17,7 +17,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     "- d3_chart (a short suggestion: e.g. \"d3.line() with x=date, y=value\", or \"d3.bar() with label,value\"), "
     "- expected_schema (one of: timeseries {{x:DATE|TIMESTAMP or STRING, y:NUMBER}}, categorical {{label:STRING, value:NUMBER}}, distribution {{label, value}}), "
     "- sql (BigQuery standard SQL) — this SQL must be ready-to-run and must return columns that match expected_schema. "
-    "- Optional: engine (e.g., 'vega-lite') and vega_lite_spec (valid Vega-Lite JSON spec using the same field names), if helpful. "
+    "- Prefer engine='vega-lite' and provide vega_lite_spec that uses data: {{values: []}} and encodes fields x/y or label/value accordingly. "
     "Use the table reference exactly as `project.dataset.table`. If using aggregation, alias columns exactly to x,y or label,value depending on expected_schema. "
     "Keep SQL simple and efficient (use LIMIT where useful). Use safe handling for NULLs. "
     "INPUT_DATA is a JSON object. "

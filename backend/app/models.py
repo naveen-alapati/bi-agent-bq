@@ -71,6 +71,7 @@ class RunKpiRequest(BaseModel):
 	sql: str
 	filters: Optional[Dict[str, Any]] = None
 	date_column: Optional[str] = None
+	expected_schema: Optional[str] = None
 
 
 class RunKpiResponse(BaseModel):
