@@ -297,9 +297,10 @@ export default function App() {
         dirty={dirty}
       />
 
-      <div className={`app-grid ${!sidebarOpen ? 'app-grid--no-sidebar' : ''}`}>
-        {sidebarOpen && (
-          <div className="sidebar" style={{ display: 'grid', gap: 12 }}>
+      <div className={`app-grid ${!sidebarOpen ? 'app-grid--collapsed' : ''}`}>
+        {(
+          <div className={`sidebar ${!sidebarOpen ? 'is-collapsed' : ''}`} style={{ display: 'grid', gap: 12 }}>
+            {/* left panels */}
             <div className="panel">
               <div className="section-title">Theme</div>
               <div className="toolbar">
