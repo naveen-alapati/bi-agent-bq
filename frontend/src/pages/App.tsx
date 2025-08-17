@@ -158,7 +158,22 @@ export default function App() {
           <div style={{ marginTop: 16 }}>
             <h3>Dashboards</h3>
             <div style={{ marginTop: 8 }}>
-              <select onChange={e => api.getDashboard(e.target.value).then(d => { setDashboardName(d.name); setVersion(d.version || ''); setKpis(d.kpis); setLayouts(d.layouts?.lg || d.layout || []); setSelected(d.selected_tables); setGlobalDate(d.global_filters?.date || {}); })} style={{ width: '100%' }}>
+              <select onChange={e => {
+                const id = e.target.value
+                if (!id) return
+                api.getDashboard(id).then(d => {
+                  setDashboardName(d.name)
+                  setVersion(d.version || '')
+                  setKpis(d.kpis)
+                  // prefer single layout if present, else try layouts.lg
+                  const nextLayout = (d.layout && d.layout.length ? d.layout : (d.layouts && (d.layouts['lg'] || d.layouts['md'] || d.layouts['sm']) || [])) as Layout[]
+                  setLayouts(nextLayout)
+                  setSelected(d.selected_tables)
+                  setGlobalDate((d.global_filters && d.global_filters.date) || {})
+                  const mode = (d.theme && (d.theme.mode as any)) || 'light'
+                  setTheme(mode === 'dark' ? 'dark' : 'light')
+                })
+              }} style={{ width: '100%' }}>
                 <option value="">Load existing...</option>
                 {dashList.map(d => (
                   <option key={d.id} value={d.id}>{d.name} (v{d.version})</option>

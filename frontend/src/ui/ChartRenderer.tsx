@@ -7,18 +7,25 @@ export function ChartRenderer({ chart, rows, onSelect }: { chart: any, rows: any
 
   useEffect(() => {
     if (chart.engine === 'vega-lite' && chart.vega_lite_spec && vegaRef.current) {
-      const spec: VisualizationSpec = {
-        ...(chart.vega_lite_spec as any),
-        data: { values: rows || [] },
-        autosize: { type: 'fit', contains: 'padding' },
-      }
-      embed(vegaRef.current, spec, { actions: false, renderer: 'canvas' }).then((res) => {
-        const view = res.view
-        view.addEventListener('click', (_evt: any, item: any) => {
-          if (!item || !item.datum) return
-          onSelect && onSelect({ datum: item.datum, chart })
+      try {
+        const baseSpec = typeof chart.vega_lite_spec === 'string' ? JSON.parse(chart.vega_lite_spec) : chart.vega_lite_spec
+        const spec: VisualizationSpec = {
+          ...(baseSpec as any),
+          data: { values: rows || [] },
+          autosize: { type: 'fit', contains: 'padding' },
+        }
+        embed(vegaRef.current, spec, { actions: false, renderer: 'canvas' }).then((res) => {
+          const view = res.view
+          view.addEventListener('click', (_evt: any, item: any) => {
+            if (!item || !item.datum) return
+            onSelect && onSelect({ datum: item.datum, chart })
+          })
+        }).catch((e) => {
+          console.error('vega-embed error', e, chart)
         })
-      }).catch(() => {})
+      } catch (e) {
+        console.error('vega spec parse error', e, chart)
+      }
     }
   }, [chart, rows])
 
