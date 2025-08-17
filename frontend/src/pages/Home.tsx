@@ -53,7 +53,7 @@ export default function Home() {
         </div>
         <div className="toolbar">
           <a className="btn" href="/editor">New Dashboard</a>
-          {active && <a className="btn btn-primary" href={`/editor`}>Edit Dashboard</a>}
+          {active && <a className="btn btn-primary" href={`/editor/${active.id}`}>Edit Dashboard</a>}
         </div>
       </div>
 

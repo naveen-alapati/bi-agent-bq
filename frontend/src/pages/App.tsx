@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { TableSelector } from '../ui/TableSelector'
 import { KPIList } from '../ui/KPIList'
 import { ChartRenderer } from '../ui/ChartRenderer'
@@ -11,6 +12,9 @@ import { TopBar } from '../ui/TopBar'
 import { KPICatalog } from '../ui/KPICatalog'
 
 export default function App() {
+  const params = useParams()
+  const [search] = useSearchParams()
+  const routeId = params.id || search.get('dashboardId') || ''
   const [datasets, setDatasets] = useState<any[]>([])
   const [selected, setSelected] = useState<{datasetId: string, tableId: string}[]>([])
   const [kpis, setKpis] = useState<any[]>([])
@@ -37,6 +41,21 @@ export default function App() {
     api.getDatasets().then(setDatasets).catch(() => setLoadError('Failed to fetch datasets. Ensure the Cloud Run service account has BigQuery list permissions.'))
     api.listDashboards().then(setDashList).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (!routeId) return
+    api.getDashboard(routeId).then(d => {
+      setDashboardName(d.name)
+      setVersion(d.version || '')
+      setKpis(d.kpis)
+      const nextLayout = (d.layout && d.layout.length ? d.layout : (d.layouts && (d.layouts['lg'] || d.layouts['md'] || d.layouts['sm']) || [])) as Layout[]
+      setLayouts(nextLayout)
+      setSelected(d.selected_tables)
+      setGlobalDate((d.global_filters && d.global_filters.date) || {})
+      const mode = (d.theme && (d.theme.mode as any)) || 'light'
+      setTheme(mode === 'dark' ? 'dark' : 'light')
+    }).catch(() => {})
+  }, [routeId])
 
   useEffect(() => {
     const el = gridWrapRef.current

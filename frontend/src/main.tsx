@@ -7,6 +7,7 @@ import Home from './pages/Home'
 const router = createBrowserRouter([
   { path: '/', element: <Home /> },
   { path: '/editor', element: <App /> },
+  { path: '/editor/:id', element: <App /> },
 ])
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
