@@ -29,6 +29,7 @@ export default function App() {
   const [globalDate, setGlobalDate] = useState<{from?: string, to?: string}>({})
   const [crossFilter, setCrossFilter] = useState<any>(null)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(true)
   const gridWrapRef = useRef<HTMLDivElement | null>(null)
   const [gridW, setGridW] = useState<number>(1000)
 
@@ -166,54 +167,58 @@ export default function App() {
         theme={theme}
         onThemeToggle={() => setTheme(t => (t === 'light' ? 'dark' : 'light'))}
         onExportDashboard={exportDashboard}
+        onToggleSidebar={() => setSidebarOpen(o => !o)}
+        sidebarOpen={sidebarOpen}
       />
 
       <div className="app-grid">
-        <div className="sidebar" style={{ display: 'grid', gap: 12 }}>
-          <div className="panel">
-            <div className="section-title">Data</div>
-            {loadError && <div className="badge" style={{ marginBottom: 8, borderColor: 'crimson', color: 'crimson', background: 'rgba(220,20,60,0.06)' }}>{loadError}</div>}
-            {datasets.length === 0 ? (
-              <div className="card-subtitle">No datasets found. Verify IAM and BigQuery project.</div>
-            ) : (
-              <TableSelector datasets={datasets} onChange={setSelected} />
-            )}
-            <button className="btn btn-primary" onClick={onAnalyze} disabled={!selected.length || loading} style={{ marginTop: 8 }}>
-              {loading ? 'Analyzing...' : `Analyze (${selected.length})`}
-            </button>
-          </div>
+        {sidebarOpen && (
+          <div className="sidebar" style={{ display: 'grid', gap: 12 }}>
+            <div className="panel">
+              <div className="section-title">Data</div>
+              {loadError && <div className="badge" style={{ marginBottom: 8, borderColor: 'crimson', color: 'crimson', background: 'rgba(220,20,60,0.06)' }}>{loadError}</div>}
+              {datasets.length === 0 ? (
+                <div className="card-subtitle">No datasets found. Verify IAM and BigQuery project.</div>
+              ) : (
+                <TableSelector datasets={datasets} onChange={setSelected} />
+              )}
+              <button className="btn btn-primary" onClick={onAnalyze} disabled={!selected.length || loading} style={{ marginTop: 8 }}>
+                {loading ? 'Analyzing...' : `Analyze (${selected.length})`}
+              </button>
+            </div>
 
-          <div className="panel">
-            <div className="section-title">KPI Catalog</div>
-            <KPICatalog onAdd={addKpiToCanvas} />
-          </div>
+            <div className="panel">
+              <div className="section-title">KPI Catalog</div>
+              <KPICatalog onAdd={addKpiToCanvas} />
+            </div>
 
-          <div className="panel">
-            <div className="section-title">Dashboards</div>
-            <div style={{ marginTop: 8 }}>
-              <select className="select" onChange={e => {
-                const id = e.target.value
-                if (!id) return
-                api.getDashboard(id).then(d => {
-                  setDashboardName(d.name)
-                  setVersion(d.version || '')
-                  setKpis(d.kpis)
-                  const nextLayout = (d.layout && d.layout.length ? d.layout : (d.layouts && (d.layouts['lg'] || d.layouts['md'] || d.layouts['sm']) || [])) as Layout[]
-                  setLayouts(nextLayout)
-                  setSelected(d.selected_tables)
-                  setGlobalDate((d.global_filters && d.global_filters.date) || {})
-                  const mode = (d.theme && (d.theme.mode as any)) || 'light'
-                  setTheme(mode === 'dark' ? 'dark' : 'light')
-                })
-              }}>
-                <option value="">Load existing...</option>
-                {dashList.map(d => (
-                  <option key={d.id} value={d.id}>{d.name} (v{d.version})</option>
-                ))}
-              </select>
+            <div className="panel">
+              <div className="section-title">Dashboards</div>
+              <div style={{ marginTop: 8 }}>
+                <select className="select" onChange={e => {
+                  const id = e.target.value
+                  if (!id) return
+                  api.getDashboard(id).then(d => {
+                    setDashboardName(d.name)
+                    setVersion(d.version || '')
+                    setKpis(d.kpis)
+                    const nextLayout = (d.layout && d.layout.length ? d.layout : (d.layouts && (d.layouts['lg'] || d.layouts['md'] || d.layouts['sm']) || [])) as Layout[]
+                    setLayouts(nextLayout)
+                    setSelected(d.selected_tables)
+                    setGlobalDate((d.global_filters && d.global_filters.date) || {})
+                    const mode = (d.theme && (d.theme.mode as any)) || 'light'
+                    setTheme(mode === 'dark' ? 'dark' : 'light')
+                  })
+                }}>
+                  <option value="">Load existing...</option>
+                  {dashList.map(d => (
+                    <option key={d.id} value={d.id}>{d.name} (v{d.version})</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         <div style={{ display: 'grid', gap: 12 }} ref={gridWrapRef}>
           <div className="section-title">Dashboard</div>
