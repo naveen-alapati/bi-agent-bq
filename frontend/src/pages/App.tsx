@@ -41,6 +41,9 @@ export default function App() {
   const [tabs, setTabs] = useState<{ id: string; name: string; order: number }[]>([{ id: 'overview', name: 'Overview', order: 0 }])
   const [tabLayouts, setTabLayouts] = useState<Record<string, Layout[]>>({ overview: [] })
   const [activeTab, setActiveTab] = useState<string>('overview')
+  const [editingTabId, setEditingTabId] = useState<string | null>(null)
+  const [editingTabName, setEditingTabName] = useState<string>('')
+  const [dragTabId, setDragTabId] = useState<string | null>(null)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -189,7 +192,7 @@ export default function App() {
   function removeTab(id: string) {
     if (id === 'overview') return
     const next = tabs.filter(t => t.id !== id)
-    setTabs(next)
+    setTabs(next.map((t, i) => ({ ...t, order: i })))
     setActiveTab('overview')
     const copy = { ...tabLayouts }
     delete copy[id]
@@ -206,6 +209,47 @@ export default function App() {
     const next = [...kpis]
     next[idx] = { ...current, tabs: Array.from(set) }
     setKpis(next)
+  }
+
+  function startEditTab(t: {id: string; name: string}) {
+    setEditingTabId(t.id)
+    setEditingTabName(t.name)
+  }
+
+  function commitEditTab() {
+    if (!editingTabId) return
+    const name = (editingTabName || '').trim() || '(untitled)'
+    setTabs(prev => prev.map(tab => tab.id === editingTabId ? { ...tab, name } : tab))
+    setEditingTabId(null)
+    setEditingTabName('')
+  }
+
+  function cancelEditTab() {
+    setEditingTabId(null)
+    setEditingTabName('')
+  }
+
+  function onDragStartTab(id: string, e: React.DragEvent) {
+    setDragTabId(id)
+    try { e.dataTransfer.setData('text/plain', id) } catch {}
+  }
+
+  function onDragOverTab(e: React.DragEvent) { e.preventDefault() }
+
+  function onDropTab(targetId: string, e: React.DragEvent) {
+    e.preventDefault()
+    const srcId = dragTabId || (() => { try { return e.dataTransfer.getData('text/plain') } catch { return '' } })()
+    if (!srcId || srcId === targetId) { setDragTabId(null); return }
+    setTabs(prev => {
+      const arr = [...prev]
+      const srcIdx = arr.findIndex(t => t.id === srcId)
+      const tgtIdx = arr.findIndex(t => t.id === targetId)
+      if (srcIdx === -1 || tgtIdx === -1) return prev
+      const [moved] = arr.splice(srcIdx, 1)
+      arr.splice(tgtIdx, 0, moved)
+      return arr.map((t, i) => ({ ...t, order: i }))
+    })
+    setDragTabId(null)
   }
 
   const visibleKpis = kpis.filter(k => (k.tabs && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview'))
@@ -298,9 +342,34 @@ export default function App() {
               }
             }}>Default</button>
           </div>
-          <div className="toolbar" style={{ gap: 6 }}>
+          <div className="toolbar" style={{ marginBottom: 8 }}>
             {tabs.sort((a,b)=>a.order-b.order).map(t => (
-              <button key={t.id} className="btn btn-sm" style={{ background: t.id===activeTab? 'var(--primary)':'', color: t.id===activeTab? '#fff': undefined, borderColor: t.id===activeTab? 'var(--primary)':'' }} onClick={() => setActiveTab(t.id)}>{t.name}</button>
+              <button
+                key={t.id}
+                className="btn btn-sm"
+                style={{ background: t.id===activeTab? 'var(--primary)':'', color: t.id===activeTab? '#fff': undefined, borderColor: t.id===activeTab? 'var(--primary)':'' }}
+                onClick={() => setActiveTab(t.id)}
+                draggable
+                onDragStart={(e) => onDragStartTab(t.id, e)}
+                onDragOver={onDragOverTab}
+                onDrop={(e) => onDropTab(t.id, e)}
+                onDoubleClick={() => startEditTab(t)}
+              >
+                {editingTabId === t.id ? (
+                  <input
+                    className="input"
+                    value={editingTabName}
+                    onChange={e => setEditingTabName(e.target.value)}
+                    autoFocus
+                    onBlur={commitEditTab}
+                    onKeyDown={e => { if (e.key === 'Enter') commitEditTab(); if (e.key === 'Escape') cancelEditTab() }}
+                    onClick={e => e.stopPropagation()}
+                    style={{ maxWidth: 140 }}
+                  />
+                ) : (
+                  <span>{t.name}</span>
+                )}
+              </button>
             ))}
             <button className="btn btn-sm" onClick={addTab}>+ Tab</button>
             {activeTab !== 'overview' && <button className="btn btn-sm" onClick={() => removeTab(activeTab)}>Delete Tab</button>}
