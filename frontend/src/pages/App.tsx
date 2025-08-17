@@ -44,7 +44,8 @@ export default function App() {
   const [editingTabId, setEditingTabId] = useState<string | null>(null)
   const [editingTabName, setEditingTabName] = useState<string>('')
   const [dragTabId, setDragTabId] = useState<string | null>(null)
-  const [palette, setPalette] = useState<{ primary: string; accent: string; surface: string; warn: string }>({ primary: '#239BA7', accent: '#7ADAA5', surface: '#ECECBB', warn: '#E1AA36' })
+  const defaultPalette = { primary: '#239BA7', accent: '#7ADAA5', surface: '#ECECBB', warn: '#E1AA36' }
+  const [palette, setPalette] = useState<{ primary: string; accent: string; surface: string; warn: string }>(defaultPalette)
 
   function applyPalette(p: { primary: string; accent: string; surface: string; warn: string }) {
     const r = document.documentElement
@@ -313,6 +314,7 @@ export default function App() {
                   <label className="card-subtitle">Warn</label>
                   <input className="input" type="color" value={palette.warn} onChange={e => { const p = { ...palette, warn: e.target.value }; setPalette(p); applyPalette(p) }} />
                 </div>
+                <button className="btn btn-sm" onClick={() => { setPalette(defaultPalette); applyPalette(defaultPalette) }}>Reset Palette</button>
               </div>
             </div>
             <div className="panel">
