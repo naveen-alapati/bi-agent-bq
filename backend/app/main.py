@@ -155,9 +155,21 @@ def save_dashboard(req: DashboardSaveRequest):
 		# serialize KPI Pydantic models to dicts
 		kpis = [k.model_dump() if hasattr(k, 'model_dump') else dict(k) for k in req.kpis]
 		layout = req.layout
+		layouts = req.layouts
 		selected = [s.model_dump() if hasattr(s, 'model_dump') else dict(s) for s in req.selected_tables]
-		new_id = bq_service.save_dashboard(name=req.name, kpis=kpis, layout=layout, selected_tables=selected, dashboard_id=req.id, dataset_id=DASH_DATASET)
-		return {"id": new_id, "name": req.name}
+		new_id = bq_service.save_dashboard(
+			name=req.name,
+			kpis=kpis,
+			layout=layout,
+			layouts=layouts,
+			selected_tables=selected,
+			global_filters=req.global_filters,
+			theme=req.theme,
+			version=req.version,
+			dashboard_id=req.id,
+			dataset_id=DASH_DATASET,
+		)
+		return {"id": new_id, "name": req.name, "version": req.version or ""}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 

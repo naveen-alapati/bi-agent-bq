@@ -106,21 +106,25 @@ class KPICatalogListResponse(BaseModel):
 class DashboardSaveRequest(BaseModel):
 	id: Optional[str] = None
 	name: str
+	version: Optional[str] = None
 	kpis: List[KPIItem]
 	layout: Optional[List[Dict[str, Any]]] = None
 	layouts: Optional[Dict[str, List[Dict[str, Any]]]] = None
 	selected_tables: List[TableRef]
 	global_filters: Optional[Dict[str, Any]] = None
+	theme: Optional[Dict[str, Any]] = None
 
 
 class DashboardSaveResponse(BaseModel):
 	id: str
 	name: str
+	version: str
 
 
 class DashboardSummary(BaseModel):
 	id: str
 	name: str
+	version: Optional[str] = None
 	created_at: Optional[str] = None
 	updated_at: Optional[str] = None
 
@@ -132,10 +136,12 @@ class DashboardListResponse(BaseModel):
 class DashboardGetResponse(BaseModel):
 	id: str
 	name: str
+	version: Optional[str] = None
 	kpis: List[KPIItem]
 	layout: Optional[List[Dict[str, Any]]] = None
 	layouts: Optional[Dict[str, List[Dict[str, Any]]]] = None
 	selected_tables: List[TableRef]
 	global_filters: Optional[Dict[str, Any]] = None
+	theme: Optional[Dict[str, Any]] = None
 	created_at: Optional[str] = None
 	updated_at: Optional[str] = None
