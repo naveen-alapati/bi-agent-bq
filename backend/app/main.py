@@ -9,6 +9,7 @@ from datetime import datetime
 import csv
 import io
 import zipfile
+from google.cloud import bigquery
 
 from .bq import BigQueryService
 from .embeddings import EmbeddingMode, EmbeddingService
@@ -112,30 +113,33 @@ def generate_kpis(req: GenerateKpisRequest):
 def run_kpi(req: RunKpiRequest):
 	try:
 		sql = req.sql
-		params = []
-		where_clauses = []
+		params: List[bigquery.ScalarQueryParameter] = []
+		where_clauses: List[str] = []
 		# apply date filter if provided
-		if req.date_column and req.filters and req.filters.get('date'):
+		if req.date_column and req.filters and isinstance(req.filters.get('date'), dict):
 			date_filter = req.filters['date']
 			if date_filter.get('from'):
 				where_clauses.append(f"{req.date_column} >= @fromDate")
-				params.append(BigQueryService.bigquery.ScalarQueryParameter("fromDate", "DATE", date_filter['from']))
+				params.append(bigquery.ScalarQueryParameter("fromDate", "DATE", date_filter['from']))
 			if date_filter.get('to'):
 				where_clauses.append(f"{req.date_column} <= @toDate")
-				params.append(BigQueryService.bigquery.ScalarQueryParameter("toDate", "DATE", date_filter['to']))
+				params.append(bigquery.ScalarQueryParameter("toDate", "DATE", date_filter['to']))
 		# apply categorical cross-filter if provided
-		if req.filters and req.filters.get('category') and isinstance(req.filters['category'], dict):
+		if req.filters and isinstance(req.filters.get('category'), dict):
 			cat = req.filters['category']
 			col = cat.get('column')
 			val = cat.get('value')
 			if col and val is not None:
 				where_clauses.append(f"{col} = @catValue")
-				params.append(BigQueryService.bigquery.ScalarQueryParameter("catValue", "STRING", str(val)))
+				params.append(bigquery.ScalarQueryParameter("catValue", "STRING", str(val)))
 		if where_clauses:
 			wrapped = f"SELECT * FROM ( {sql} ) WHERE " + " AND ".join(where_clauses)
-			rows = bq_service.client.query(wrapped, job_config=BigQueryService.bigquery.QueryJobConfig(query_parameters=params), location=bq_service.location)
-			result_rows = [dict(r) for r in rows]
-			return {"rows": bq_service._normalize_value(result_rows)}
+			job_config = bigquery.QueryJobConfig(query_parameters=params)
+			rows_iter = bq_service.client.query(wrapped, job_config=job_config, location=bq_service.location)
+			result_rows = [dict(r) for r in rows_iter]
+			# normalize
+			norm = [ { k: bq_service._normalize_value(v) for k, v in r.items() } for r in result_rows ]
+			return {"rows": norm}
 		rows = bq_service.query_rows(sql)
 		return {"rows": rows}
 	except Exception as exc:
