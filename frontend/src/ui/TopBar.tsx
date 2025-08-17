@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 
 export function TopBar({
   name,
@@ -13,6 +13,7 @@ export function TopBar({
   onExportDashboard,
   onToggleSidebar,
   sidebarOpen,
+  dirty,
 }: {
   name: string
   version?: string
@@ -26,16 +27,40 @@ export function TopBar({
   onExportDashboard: () => void
   onToggleSidebar?: () => void
   sidebarOpen?: boolean
+  dirty?: boolean
 }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(name)
+
+  const startEdit = () => { setDraft(name); setEditing(true) }
+  const commit = () => { setEditing(false); if (draft !== name) onNameChange(draft) }
+  const cancel = () => { setEditing(false); setDraft(name) }
+
   return (
     <div className="topbar header-gradient" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', position: 'sticky', top: 0, zIndex: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <button className="btn btn-ghost" onClick={onToggleSidebar} title={sidebarOpen ? 'Collapse' : 'Expand'}>|||</button>
         <a className="btn btn-ghost" href="/">Home</a>
-        <input className="input" value={name} onChange={e => onNameChange(e.target.value)} placeholder="dashboard name" style={{ fontSize: 16, fontWeight: 600 }} />
+        {editing ? (
+          <input
+            className="input"
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            autoFocus
+            onBlur={commit}
+            onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') cancel() }}
+            style={{ fontSize: 16, fontWeight: 600 }}
+          />
+        ) : (
+          <span className="chip" style={{ fontSize: 16, fontWeight: 700, cursor: 'text' }} onDoubleClick={startEdit} title="Double-click to rename">{name}</span>
+        )}
         {version && <span className="badge">v{version}</span>}
-        <button className="btn btn-primary" onClick={onSave}>Save</button>
-        <button className="btn btn-ghost" onClick={onSaveAs}>Save As</button>
+        {dirty && (
+          <>
+            <button className="btn btn-primary" onClick={onSave}>Save</button>
+            <button className="btn btn-ghost" onClick={onSaveAs}>Save As</button>
+          </>
+        )}
       </div>
       <div className="toolbar" style={{ alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
