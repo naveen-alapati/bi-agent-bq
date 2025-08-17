@@ -91,9 +91,9 @@ body {
   --warn: #E1AA36;
 }
 
-/* Header gradient theme */
+/* Header solid theme */
 .header-gradient { 
-  background: linear-gradient(90deg, var(--primary) 0%, var(--accent) 60%);
+  background: var(--primary);
   color: #fff;
   border-bottom: none;
 }

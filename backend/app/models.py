@@ -61,6 +61,7 @@ class KPIItem(BaseModel):
 	engine: Optional[str] = None
 	vega_lite_spec: Optional[Dict[str, Any]] = None
 	filter_date_column: Optional[str] = None
+	tabs: Optional[List[str]] = None
 
 
 class GenerateKpisResponse(BaseModel):
@@ -102,6 +103,13 @@ class KPICatalogListResponse(BaseModel):
 	items: List[KPICatalogItem]
 
 
+# Tabs
+class DashboardTab(BaseModel):
+	id: str
+	name: str
+	order: int
+
+
 # Dashboards
 class DashboardSaveRequest(BaseModel):
 	id: Optional[str] = None
@@ -113,6 +121,10 @@ class DashboardSaveRequest(BaseModel):
 	selected_tables: List[TableRef]
 	global_filters: Optional[Dict[str, Any]] = None
 	theme: Optional[Dict[str, Any]] = None
+	# New
+	tabs: Optional[List[DashboardTab]] = None
+	tab_layouts: Optional[Dict[str, List[Dict[str, Any]]]] = None
+	last_active_tab: Optional[str] = None
 
 
 class DashboardSaveResponse(BaseModel):
@@ -145,3 +157,7 @@ class DashboardGetResponse(BaseModel):
 	theme: Optional[Dict[str, Any]] = None
 	created_at: Optional[str] = None
 	updated_at: Optional[str] = None
+	# New
+	tabs: Optional[List[DashboardTab]] = None
+	tab_layouts: Optional[Dict[str, List[Dict[str, Any]]]] = None
+	last_active_tab: Optional[str] = None
