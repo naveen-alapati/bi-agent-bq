@@ -284,5 +284,24 @@ def kpi_catalog_list(datasetId: Optional[str] = None, tableId: Optional[str] = N
 
 # Serve built SPA (Dockerfile copies frontend/dist to /app/static)
 static_dir = os.path.abspath(os.getenv("STATIC_DIR", "/app/static"))
-if os.path.isdir(static_dir):
-	app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+assets_dir = os.path.join(static_dir, "assets")
+if os.path.isdir(assets_dir):
+	app.mount("/assets", StaticFiles(directory=assets_dir, html=False), name="assets")
+
+# Serve index.html at root and for deep links (non-API)
+@app.get("/")
+def index():
+	index_path = os.path.join(static_dir, "index.html")
+	if os.path.isfile(index_path):
+		return FileResponse(index_path)
+	raise HTTPException(status_code=404, detail="Not Found")
+
+@app.get("/{full_path:path}")
+def spa_fallback(full_path: str):
+	# Let API routes 404 as-is
+	if full_path.startswith("api/") or full_path == "api":
+		raise HTTPException(status_code=404, detail="Not Found")
+	index_path = os.path.join(static_dir, "index.html")
+	if os.path.isfile(index_path):
+		return FileResponse(index_path)
+	raise HTTPException(status_code=404, detail="Not Found")

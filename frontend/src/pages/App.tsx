@@ -237,6 +237,13 @@ export default function App() {
                       a.click()
                       URL.revokeObjectURL(url)
                     }}>Export</button>
+                    <button className="btn btn-sm" onClick={() => {
+                      const nextKpis = kpis.filter(x => x.id !== k.id)
+                      const nextLayout = layouts.filter(l => l.i !== k.id)
+                      setKpis(nextKpis)
+                      setLayouts(nextLayout)
+                      setRowsByKpi(prev => { const { [k.id]: _, ...rest } = prev; return rest })
+                    }}>Remove</button>
                   </div>
                 </div>
                 <div style={{ flex: 1, padding: 8 }} className="no-drag">
