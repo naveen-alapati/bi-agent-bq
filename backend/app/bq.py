@@ -268,22 +268,28 @@ class BigQueryService:
     def ensure_dashboards_table(self, dataset_id: str = "analytics_dash", table: str = "dashboards") -> str:
         self.ensure_dataset(dataset_id)
         table_fqn = f"{self.project_id}.{dataset_id}.{table}"
+        required = [
+            ("id", "STRING"),
+            ("name", "STRING"),
+            ("version", "STRING"),
+            ("kpis", "STRING"),
+            ("layout", "STRING"),
+            ("layouts", "STRING"),
+            ("selected_tables", "STRING"),
+            ("global_filters", "STRING"),
+            ("theme", "STRING"),
+            ("created_at", "TIMESTAMP"),
+            ("updated_at", "TIMESTAMP"),
+        ]
         try:
-            self.client.get_table(table_fqn)
+            table_obj = self.client.get_table(table_fqn)
+            existing = {f.name: f.field_type for f in table_obj.schema}
+            missing = [(n,t) for (n,t) in required if n not in existing]
+            for name, typ in missing:
+                ddl = f"ALTER TABLE `{table_fqn}` ADD COLUMN IF NOT EXISTS {name} {typ}"
+                self.client.query(ddl, location=self.location).result()
         except NotFound:
-            schema = [
-                bigquery.SchemaField("id", "STRING"),
-                bigquery.SchemaField("name", "STRING"),
-                bigquery.SchemaField("version", "STRING"),
-                bigquery.SchemaField("kpis", "STRING"),
-                bigquery.SchemaField("layout", "STRING"),
-                bigquery.SchemaField("layouts", "STRING"),
-                bigquery.SchemaField("selected_tables", "STRING"),
-                bigquery.SchemaField("global_filters", "STRING"),
-                bigquery.SchemaField("theme", "STRING"),
-                bigquery.SchemaField("created_at", "TIMESTAMP"),
-                bigquery.SchemaField("updated_at", "TIMESTAMP"),
-            ]
+            schema = [bigquery.SchemaField(n, t) for (n, t) in required]
             table_obj = bigquery.Table(table_fqn, schema=schema)
             self.client.create_table(table_obj)
         return table_fqn
