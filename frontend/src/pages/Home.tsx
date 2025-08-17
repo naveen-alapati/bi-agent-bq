@@ -19,6 +19,8 @@ export default function Home() {
   }
   const gridWrapRef = useRef<HTMLDivElement | null>(null)
   const [gridW, setGridW] = useState<number>(1000)
+  const [tabs, setTabs] = useState<{ id: string; name: string; order: number }[]>([{ id: 'overview', name: 'Overview', order: 0 }])
+  const [activeTab, setActiveTab] = useState<string>('overview')
 
   useEffect(() => { api.listDashboards().then(setDashboards).catch(() => {}) }, [])
   useEffect(() => {
@@ -42,11 +44,9 @@ export default function Home() {
     const d = await api.getDashboard(id)
     setActive(d)
     setRowsByKpi({})
-    if (d.global_filters && d.global_filters.date) {
-      setLocalFilters({ from: d.global_filters.date.from, to: d.global_filters.date.to })
-    } else {
-      setLocalFilters({})
-    }
+    setTabs((d.tabs && d.tabs.length ? d.tabs : [{ id: 'overview', name: 'Overview', order: 0 }]))
+    setActiveTab(d.last_active_tab || 'overview')
+    if (d.global_filters && d.global_filters.date) { setLocalFilters({ from: d.global_filters.date.from, to: d.global_filters.date.to }) } else { setLocalFilters({}) }
     setTimeout(() => refreshAll(d), 0)
   }
 
@@ -69,10 +69,14 @@ export default function Home() {
 
   const layout: Layout[] = useMemo(() => {
     if (!active) return []
-    const l = (active.layout && active.layout.length ? active.layout : (active.layouts && (active.layouts['lg'] || active.layouts['md'] || active.layouts['sm']) || [])) as Layout[]
-    if (l && l.length) return l
-    return (active.kpis || []).map((k: any, i: number) => ({ i: k.id, x: (i % 2) * 6, y: Math.floor(i/2) * 8, w: 6, h: 8 }))
-  }, [active])
+    const tl = (active.tab_layouts || {})
+    return tl[activeTab] || (active.layout || [])
+  }, [active, activeTab])
+
+  const visibleKpis = useMemo(() => {
+    if (!active) return []
+    return (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview'))
+  }, [active, activeTab])
 
   return (
     <div>
@@ -134,6 +138,12 @@ export default function Home() {
                 <button className="btn btn-primary" onClick={() => refreshAll()}>Refresh</button>
               </div>
 
+              <div className="toolbar" style={{ gap: 6 }}>
+                {tabs.sort((a,b)=>a.order-b.order).map(t => (
+                  <button key={t.id} className="btn btn-sm" style={{ background: t.id===activeTab? 'var(--primary)':'', color: t.id===activeTab? '#fff': undefined, borderColor: t.id===activeTab? 'var(--primary)':'' }} onClick={() => setActiveTab(t.id)}>{t.name}</button>
+                ))}
+              </div>
+
               <GridLayout
                 className="layout"
                 layout={layout}
@@ -143,7 +153,7 @@ export default function Home() {
                 isResizable={false}
                 isDraggable={false}
               >
-                {(active.kpis || []).map((k: any) => (
+                {visibleKpis.map((k: any) => (
                   <div key={k.id} data-grid={layout.find(l => l.i === k.id)} className="card" style={{ display: 'flex', flexDirection: 'column' }}>
                     <div className="card-header">
                       <div>
@@ -154,9 +164,7 @@ export default function Home() {
                         <button className="btn btn-sm" onClick={() => runKpiWithFilters(k)}>Refresh</button>
                       </div>
                     </div>
-                    <div style={{ flex: 1, padding: 8 }} className="no-drag">
-                      <ChartRenderer chart={k} rows={rowsByKpi[k.id] || []} />
-                    </div>
+                    <div style={{ flex: 1, padding: 8 }} className="no-drag"><ChartRenderer chart={k} rows={rowsByKpi[k.id] || []} /></div>
                   </div>
                 ))}
               </GridLayout>

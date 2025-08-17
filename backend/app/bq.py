@@ -279,6 +279,9 @@ class BigQueryService:
             ("global_filters", "STRING"),
             ("theme", "STRING"),
             ("default_flag", "BOOL"),
+            ("tabs", "STRING"),
+            ("tab_layouts", "STRING"),
+            ("last_active_tab", "STRING"),
             ("created_at", "TIMESTAMP"),
             ("updated_at", "TIMESTAMP"),
         ]
@@ -320,7 +323,7 @@ class BigQueryService:
         maj, mi, pa = map(int, m.groups())
         return f"{maj}.{mi}.{pa+1}"
 
-    def save_dashboard(self, name: str, kpis: List[Dict[str, Any]], layout: Optional[List[Dict[str, Any]]], layouts: Optional[Dict[str, List[Dict[str, Any]]]], selected_tables: List[Dict[str, Any]], global_filters: Optional[Dict[str, Any]], theme: Optional[Dict[str, Any]], version: Optional[str] = None, dashboard_id: Optional[str] = None, dataset_id: str = "analytics_dash") -> Tuple[str, str]:
+    def save_dashboard(self, name: str, kpis: List[Dict[str, Any]], layout: Optional[List[Dict[str, Any]]], layouts: Optional[Dict[str, List[Dict[str, Any]]]], selected_tables: List[Dict[str, Any]], global_filters: Optional[Dict[str, Any]], theme: Optional[Dict[str, Any]], version: Optional[str] = None, dashboard_id: Optional[str] = None, dataset_id: str = "analytics_dash", tabs: Optional[List[Dict[str, Any]]] = None, tab_layouts: Optional[Dict[str, List[Dict[str, Any]]]] = None, last_active_tab: Optional[str] = None) -> Tuple[str, str]:
         table = self.ensure_dashboards_table(dataset_id)
         did = dashboard_id or uuid.uuid4().hex
         now = datetime.now(timezone.utc)
@@ -360,6 +363,9 @@ class BigQueryService:
             "selected_tables": json.dumps(selected_tables),
             "global_filters": json.dumps(global_filters or {}),
             "theme": json.dumps(theme or {}),
+            "tabs": json.dumps(tabs or []),
+            "tab_layouts": json.dumps(tab_layouts or {}),
+            "last_active_tab": (last_active_tab or "overview"),
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
         }
@@ -377,7 +383,7 @@ class BigQueryService:
 
     def get_dashboard(self, dashboard_id: str, dataset_id: str = "analytics_dash") -> Optional[Dict[str, Any]]:
         table = self.ensure_dashboards_table(dataset_id)
-        sql = f"SELECT id, name, version, kpis, layout, layouts, selected_tables, global_filters, theme, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at FROM `{table}` WHERE id=@id LIMIT 1"
+        sql = f"SELECT id, name, version, kpis, layout, layouts, selected_tables, global_filters, theme, tabs, tab_layouts, last_active_tab, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at FROM `{table}` WHERE id=@id LIMIT 1"
         job = self.client.query(
             sql,
             job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", dashboard_id)]),
@@ -402,6 +408,9 @@ class BigQueryService:
             "selected_tables": parse_json_field(row["selected_tables"]),
             "global_filters": parse_json_field(row.get("global_filters") or "{}"),
             "theme": parse_json_field(row.get("theme") or "{}"),
+            "tabs": parse_json_field(row.get("tabs") or "[]"),
+            "tab_layouts": parse_json_field(row.get("tab_layouts") or "{}"),
+            "last_active_tab": row.get("last_active_tab") or "overview",
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }

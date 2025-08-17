@@ -38,6 +38,9 @@ export default function App() {
     setToasts(t => [...t, { id, type, msg }])
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4500)
   }
+  const [tabs, setTabs] = useState<{ id: string; name: string; order: number }[]>([{ id: 'overview', name: 'Overview', order: 0 }])
+  const [tabLayouts, setTabLayouts] = useState<Record<string, Layout[]>>({ overview: [] })
+  const [activeTab, setActiveTab] = useState<string>('overview')
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -54,9 +57,13 @@ export default function App() {
     api.getDashboard(routeId).then(d => {
       setDashboardName(d.name)
       setVersion(d.version || '')
-      setKpis(d.kpis)
-      const nextLayout = (d.layout && d.layout.length ? d.layout : (d.layouts && (d.layouts['lg'] || d.layouts['md'] || d.layouts['sm']) || [])) as Layout[]
-      setLayouts(nextLayout)
+      setKpis(d.kpis.map((k:any) => ({ ...k, tabs: Array.isArray(k.tabs) && k.tabs.length ? k.tabs : ['overview'] })))
+      const nextTabs = (d.tabs && d.tabs.length ? d.tabs : [{ id: 'overview', name: 'Overview', order: 0 }])
+      setTabs(nextTabs)
+      const tl = d.tab_layouts || {}
+      if (!tl['overview'] && Array.isArray(d.layout)) tl['overview'] = d.layout
+      setTabLayouts(tl)
+      setActiveTab(d.last_active_tab || 'overview')
       setSelected(d.selected_tables)
       setGlobalDate((d.global_filters && d.global_filters.date) || {})
       const mode = (d.theme && (d.theme.mode as any)) || 'light'
@@ -102,10 +109,12 @@ export default function App() {
   useEffect(() => {
     const defaultLayout = kpis.map((k, i) => ({ i: k.id, x: (i % 2) * 6, y: Math.floor(i / 2) * 8, w: 6, h: 8 }))
     setLayouts(defaultLayout)
+    setTabLayouts(prev => ({ ...prev, [activeTab]: def }))
   }, [kpis])
 
   function onLayoutChange(newLayout: Layout[]) {
     setLayouts(newLayout)
+    setTabLayouts(prev => ({ ...prev, [activeTab]: newLayout }))
   }
 
   async function saveDashboard(asNew?: boolean) {
@@ -117,9 +126,13 @@ export default function App() {
         version: asNew ? '1.0.0' : undefined,
         kpis,
         layout: layouts,
+        layouts: undefined,
         selected_tables: selected,
         global_filters: { date: globalDate },
         theme: { mode: theme },
+        tabs,
+        tab_layouts: tabLayouts,
+        last_active_tab: activeTab,
       }
       const res = await api.saveDashboard(payload as any)
       setVersion(res.version)
@@ -161,6 +174,42 @@ export default function App() {
     setKpis(prev => [...prev, k])
     setLayouts(prev => [...prev, { i: id, x: 0, y: Infinity, w: 6, h: 8 }])
   }
+
+  function addTab() {
+    const name = prompt('New tab name') || ''
+    if (!name) return
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || `tab-${Date.now()}`
+    const order = tabs.length
+    const next = [...tabs, { id, name, order }]
+    setTabs(next)
+    setActiveTab(id)
+    setTabLayouts(prev => ({ ...prev, [id]: [] }))
+  }
+
+  function removeTab(id: string) {
+    if (id === 'overview') return
+    const next = tabs.filter(t => t.id !== id)
+    setTabs(next)
+    setActiveTab('overview')
+    const copy = { ...tabLayouts }
+    delete copy[id]
+    setTabLayouts(copy)
+  }
+
+  function toggleKpiTab(k: any, tabId: string) {
+    const idx = kpis.findIndex(x => x.id === k.id)
+    if (idx < 0) return
+    const current = kpis[idx]
+    const set = new Set(current.tabs || ['overview'])
+    if (set.has(tabId)) set.delete(tabId)
+    else set.add(tabId)
+    const next = [...kpis]
+    next[idx] = { ...current, tabs: Array.from(set) }
+    setKpis(next)
+  }
+
+  const visibleKpis = kpis.filter(k => (k.tabs && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview'))
+  const activeLayout = tabLayouts[activeTab] || layouts
 
   return (
     <div>
@@ -249,70 +298,38 @@ export default function App() {
               }
             }}>Default</button>
           </div>
-          <GridLayout
-            className="layout"
-            layout={layouts}
-            cols={12}
-            rowHeight={30}
-            width={gridW}
-            isResizable
-            isDraggable
-            draggableHandle=".drag-handle"
-            draggableCancel=".no-drag, button, input, textarea, select"
-            onLayoutChange={onLayoutChange}
-          >
-            {kpis.map(k => (
-              <div key={k.id} data-grid={layouts.find(l => l.i === k.id)} className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+          <div className="toolbar" style={{ gap: 6 }}>
+            {tabs.sort((a,b)=>a.order-b.order).map(t => (
+              <button key={t.id} className="btn btn-sm" style={{ background: t.id===activeTab? 'var(--primary)':'', color: t.id===activeTab? '#fff': undefined, borderColor: t.id===activeTab? 'var(--primary)':'' }} onClick={() => setActiveTab(t.id)}>{t.name}</button>
+            ))}
+            <button className="btn btn-sm" onClick={addTab}>+ Tab</button>
+            {activeTab !== 'overview' && <button className="btn btn-sm" onClick={() => removeTab(activeTab)}>Delete Tab</button>}
+          </div>
+          <GridLayout className="layout" layout={activeLayout} cols={12} rowHeight={30} width={gridW} isResizable isDraggable draggableHandle=".drag-handle" draggableCancel=".no-drag, button, input, textarea, select" onLayoutChange={onLayoutChange}>
+            {visibleKpis.map(k => (
+              <div key={k.id} data-grid={(activeLayout||[]).find(l => l.i === k.id)} className="card" style={{ display: 'flex', flexDirection: 'column' }}>
                 <div className="card-header">
-                  <div className="drag-handle">
-                    <div className="card-title">{k.name}</div>
-                    <div className="card-subtitle">{k.short_description}</div>
-                  </div>
+                  <div className="drag-handle"><div className="card-title">{k.name}</div><div className="card-subtitle">{k.short_description}</div></div>
                   <div className="card-actions no-drag">
                     <button className="btn btn-sm" onClick={() => runKpi(k)}>Test</button>
                     <button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
                     <button className="btn btn-sm" onClick={async () => {
-                      const instruction = prompt('AI Edit: describe the change (e.g., change chart to bar by category, rename axis, limit 12)')
+                      const instruction = prompt('AI Edit: describe the change')
                       if (!instruction) return
                       const updated = await api.editKpi(k, instruction)
-                      // merge updated fields into this KPI
                       const idx = kpis.findIndex(x => x.id === k.id)
                       if (idx >= 0) {
-                        const next = [...kpis]
-                        next[idx] = { ...next[idx], ...updated }
-                        setKpis(next)
-                        // also persist to KPI catalog
-                        try {
-                          const prefix = (k.id || '').split(':')[0]
-                          const [ds, tb] = prefix.split('.')
-                          if (ds && tb) {
-                            await api.addToKpiCatalog(ds, tb, [next[idx]])
-                          }
-                        } catch {}
+                        const next = [...kpis]; next[idx] = { ...next[idx], ...updated }; setKpis(next)
+                        try { const [ds,tb] = (k.id||'').split(':')[0].split('.'); if (ds&&tb) await api.addToKpiCatalog(ds,tb,[next[idx]]) } catch {}
                       }
                     }}>AI Edit</button>
                     <button className="btn btn-sm" onClick={async () => {
-                      const r = await fetch('/api/export/card', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql: k.sql }) })
-                      const blob = await r.blob()
-                      const url = URL.createObjectURL(blob)
-                      const a = document.createElement('a')
-                      a.href = url
-                      a.download = `${k.name || 'card'}.csv`
-                      a.click()
-                      URL.revokeObjectURL(url)
+                      const r = await fetch('/api/export/card', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql: k.sql }) }); const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${k.name||'card'}.csv`; a.click(); URL.revokeObjectURL(url)
                     }}>Export</button>
-                    <button className="btn btn-sm" onClick={() => {
-                      const nextKpis = kpis.filter(x => x.id !== k.id)
-                      const nextLayout = layouts.filter(l => l.i !== k.id)
-                      setKpis(nextKpis)
-                      setLayouts(nextLayout)
-                      setRowsByKpi(prev => { const { [k.id]: _, ...rest } = prev; return rest })
-                    }}>Remove</button>
+                    <button className="btn btn-sm" onClick={() => { const nextKpis = kpis.filter(x => x.id !== k.id); const nextLayout = (activeLayout||[]).filter(l => l.i !== k.id); setKpis(nextKpis); setLayouts(nextLayout); setTabLayouts(prev => ({ ...prev, [activeTab]: nextLayout })) }}>Remove</button>
                   </div>
                 </div>
-                <div style={{ flex: 1, padding: 8 }} className="no-drag">
-                  <ChartRenderer chart={k} rows={rowsByKpi[k.id] || []} onSelect={(p) => setCrossFilter(p)} />
-                </div>
+                <div style={{ flex: 1, padding: 8 }} className="no-drag"><ChartRenderer chart={k} rows={rowsByKpi[k.id] || []} onSelect={(p) => setCrossFilter(p)} /></div>
               </div>
             ))}
           </GridLayout>
