@@ -496,16 +496,6 @@ export default function Home() {
                 </div>
                 <div className="toolbar" style={{ marginLeft: 'auto' }}>
                   <button className="btn" onClick={() => refreshAll()}>Refresh</button>
-                  <button className="btn" onClick={async () => {
-                    const kpis = visibleKpis
-                    const r = await fetch('/api/export/dashboard', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kpis }) });
-                    const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${active.name || 'dashboard'}-${activeTab}.zip`; a.click(); URL.revokeObjectURL(url)
-                  }}>Export Current Tab</button>
-                  <button className="btn" onClick={async () => {
-                    const kpis = active.kpis || []
-                    const r = await fetch('/api/export/dashboard', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kpis }) });
-                    const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${active.name || 'dashboard'}.zip`; a.click(); URL.revokeObjectURL(url)
-                  }}>Export All</button>
                 </div>
               </div>
 
