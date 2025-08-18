@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { TableSelector } from '../ui/TableSelector'
 import { KPIList } from '../ui/KPIList'
 import { ChartRenderer } from '../ui/ChartRenderer'
@@ -17,6 +17,7 @@ import Cookies from 'js-cookie'
 
 export default function App() {
   const params = useParams()
+  const navigate = useNavigate()
   const [search] = useSearchParams()
   const routeId = params.id || search.get('dashboardId') || ''
   const [datasets, setDatasets] = useState<any[]>([])
@@ -26,6 +27,8 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [dashboardName, setDashboardName] = useState('ecom-v1')
+  const [originalName, setOriginalName] = useState<string>('')
+  const [originalId, setOriginalId] = useState<string>('')
   const [version, setVersion] = useState<string>('')
   const [layouts, setLayouts] = useState<Layout[]>([])
   const [dashList, setDashList] = useState<any[]>([])
@@ -33,6 +36,7 @@ export default function App() {
   const [globalDate, setGlobalDate] = useState<{from?: string, to?: string}>({})
   const [crossFilter, setCrossFilter] = useState<any>(null)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const [hidden, setHidden] = useState<boolean>(false)
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true)
   const gridWrapRef = useRef<HTMLDivElement | null>(null)
   const [gridW, setGridW] = useState<number>(1000)
@@ -59,11 +63,11 @@ export default function App() {
   const [tourRun, setTourRun] = useState(false)
   const editorTourDone = Cookies.get('tour_editor_done') === '1'
   const editorSteps: Step[] = [
-    { target: '.topbar .btn.btn-primary', content: 'Save appears only after changes. Use Set as Default to load this dashboard first on Home.', placement: 'bottom' },
-    { target: '.panel .section-title', content: 'Select tables and Analyze to generate KPIs; they auto-save to KPI Catalog.', placement: 'right' },
-    { target: '.panel .scroll', content: 'KPI Catalog: Add KPIs; they land in the current tab and auto-run.', placement: 'right' },
-    { target: '.layout', content: 'Drag/resize cards. Only the header acts as drag handle so toolbar buttons won\'t drag.', placement: 'top' },
-    { target: '.card .card-actions .btn.btn-sm:last-child', content: 'Open AI Edit for interactive refinement with readable Markdown replies.', placement: 'left' },
+    { target: '[data-tour="editor-save"]', content: 'Save appears only after changes. Use Set as Default to load this dashboard first on Home.', placement: 'bottom' },
+    { target: '[data-tour="editor-data"]', content: 'Select tables and Analyze to generate KPIs; they auto-save to KPI Catalog.', placement: 'right' },
+    { target: '[data-tour="editor-kpi-catalog"]', content: 'KPI Catalog: Add KPIs; they land in the current tab and auto-run.', placement: 'right' },
+    { target: '[data-tour="editor-grid"]', content: 'Drag/resize cards. Only the header acts as drag handle so toolbar buttons won\'t drag.', placement: 'top' },
+    { target: '[data-tour="editor-ai-edit"]', content: 'Open AI Edit for interactive refinement with readable Markdown replies.', placement: 'left' },
   ]
   useEffect(() => { if (!editorTourDone) setTourRun(true) }, [])
   const onEditorTourCb = (data: CallBackProps) => {
@@ -100,6 +104,8 @@ export default function App() {
     if (!routeId) return
     api.getDashboard(routeId).then(d => {
       setDashboardName(d.name)
+      setOriginalName(d.name || '')
+      setOriginalId(d.id || '')
       setVersion(d.version || '')
       setKpis(d.kpis.map((k:any) => ({ ...k, tabs: Array.isArray(k.tabs) && k.tabs.length ? k.tabs : ['overview'] })))
       const nextTabs = (d.tabs && d.tabs.length ? d.tabs : [{ id: 'overview', name: 'Overview', order: 0 }])
@@ -114,6 +120,7 @@ export default function App() {
       setTheme(mode === 'dark' ? 'dark' : 'light')
       const savedPal = (d.theme && (d.theme.palette as any)) || null
       if (savedPal && savedPal.primary) { setPalette(savedPal); applyPalette(savedPal) } else { applyPalette(palette) }
+      setHidden(Boolean(d.hidden))
       setDirty(false)
     }).catch(() => {})
   }, [routeId])
@@ -134,6 +141,7 @@ export default function App() {
       await api.prepare(selected, 5)
       const kpisResp = await api.generateKpis(selected, 5)
       setKpis(kpisResp)
+      setDirty(true)
       for (const sel of selected) {
         const perTable = kpisResp.filter(k => (k.id || '').startsWith(`${sel.datasetId}.${sel.tableId}:`))
         if (perTable.length) {
@@ -168,10 +176,11 @@ export default function App() {
   async function saveDashboard(asNew?: boolean) {
     setSaving(true)
     try {
+      const isRename = Boolean(routeId && originalName && (dashboardName.trim() !== originalName))
       const payload = {
-        id: asNew ? undefined : undefined,
+        id: (asNew || isRename) ? undefined : (routeId || undefined),
         name: dashboardName,
-        version: asNew ? '1.0.0' : undefined,
+        version: (asNew || isRename) ? '1.0.0' : undefined,
         kpis,
         layout: layouts,
         layouts: undefined,
@@ -181,12 +190,19 @@ export default function App() {
         tabs,
         tab_layouts: tabLayouts,
         last_active_tab: activeTab,
+        hidden,
       }
       const res = await api.saveDashboard(payload as any)
       setVersion(res.version)
       await api.listDashboards().then(setDashList)
       toast('success', `Saved ${res.name} v${res.version}`)
       setDirty(false)
+      // Navigate to the saved dashboard id if changed (e.g., rename created new id)
+      if (res.id && res.id !== routeId) {
+        navigate(`/editor/${res.id}`)
+        setOriginalId(res.id)
+        setOriginalName(res.name || dashboardName)
+      }
     } catch (e: any) {
       toast('error', e?.message || 'Failed to save')
     } finally {
@@ -249,6 +265,7 @@ export default function App() {
     const copy = { ...tabLayouts }
     delete copy[id]
     setTabLayouts(copy)
+    setDirty(true)
   }
 
   function toggleKpiTab(k: any, tabId: string) {
@@ -261,6 +278,7 @@ export default function App() {
     const next = [...kpis]
     next[idx] = { ...current, tabs: Array.from(set) }
     setKpis(next)
+    setDirty(true)
   }
 
   function startEditTab(t: {id: string; name: string}) {
@@ -274,6 +292,7 @@ export default function App() {
     setTabs(prev => prev.map(tab => tab.id === editingTabId ? { ...tab, name } : tab))
     setEditingTabId(null)
     setEditingTabName('')
+    setDirty(true)
   }
 
   function cancelEditTab() {
@@ -355,7 +374,6 @@ export default function App() {
         version={version}
         onNameChange={(v) => { setDashboardName(v); setDirty(true) }}
         onSave={() => saveDashboard(false)}
-        onSaveAs={() => saveDashboard(true)}
         globalDate={globalDate}
         onGlobalDateChange={(v) => { setGlobalDate(v); setDirty(true) }}
         theme={theme}
@@ -370,7 +388,7 @@ export default function App() {
         {(
           <div className={`sidebar ${!sidebarOpen ? 'is-collapsed' : ''}`} style={{ display: 'grid', gap: 12 }}>
             {/* left panels */}
-            <div className="panel">
+            <div className="panel" data-tour="editor-data">
               <div className="section-title">Theme</div>
               <div className="toolbar">
                 <div>
@@ -406,7 +424,7 @@ export default function App() {
             </div>
             <div className="panel">
               <div className="section-title">KPI Catalog</div>
-              <KPICatalog onAdd={addKpiToCanvas} />
+              <div data-tour="editor-kpi-catalog"><KPICatalog onAdd={addKpiToCanvas} /></div>
             </div>
             <div className="panel">
               <div className="section-title">Dashboards</div>
@@ -495,6 +513,10 @@ export default function App() {
                 if (current?.id) { await api.setDefaultDashboard(current.id); toast('success','Set as default dashboard') } else { toast('error','Save first') }
               } catch(e:any){ toast('error', e?.message||'Failed') }
             }}>Default</button>
+            <label style={{ marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={hidden} onChange={(e) => { setHidden(e.target.checked); setDirty(true) }} />
+              <span className="card-subtitle">Hide from Home</span>
+            </label>
           </div>
 
           <div className="tabs-bar">
@@ -534,7 +556,7 @@ export default function App() {
             <button className="tab-arrow" onClick={() => { const el = document.getElementById('tabs-scroll'); if (el) el.scrollBy({ left: 160, behavior: 'smooth' }) }}>❯</button>
             {activeTab !== 'overview' && <button className="btn btn-sm" onClick={() => { removeTab(activeTab); setDirty(true) }}>Delete Tab</button>}
           </div>
-          <GridLayout className="layout" layout={activeLayout} cols={12} rowHeight={30} width={gridW} isResizable isDraggable draggableHandle=".drag-handle" draggableCancel=".no-drag, button, input, textarea, select" onLayoutChange={onLayoutChange}>
+          <GridLayout className="layout" data-tour="editor-grid" layout={activeLayout} cols={12} rowHeight={30} width={gridW} isResizable isDraggable draggableHandle=".drag-handle" draggableCancel=".no-drag, button, input, textarea, select" onLayoutChange={onLayoutChange}>
             {visibleKpis.map(k => (
               <div key={k.id} data-grid={(activeLayout||[]).find(l => l.i === k.id)} className="card" style={{ display: 'flex', flexDirection: 'column' }}>
                 <div className="card-header">
@@ -542,7 +564,7 @@ export default function App() {
                   <div className="card-actions no-drag">
                     <button className="btn btn-sm" onClick={() => runKpi(k)}>Test</button>
                     <button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
-                    <button className="btn btn-sm" onClick={() => openAiEdit(k)}>AI Edit</button>
+                    <button className="btn btn-sm" data-tour="editor-ai-edit" onClick={() => openAiEdit(k)}>AI Edit</button>
                     <button className="btn btn-sm" onClick={async () => {
                       const r = await fetch('/api/export/card', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql: k.sql }) }); const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${k.name||'card'}.csv`; a.click(); URL.revokeObjectURL(url)
                     }}>Export</button>

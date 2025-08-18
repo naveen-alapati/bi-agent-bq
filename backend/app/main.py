@@ -326,6 +326,7 @@ def save_dashboard(req: DashboardSaveRequest):
 			tabs=[t.model_dump() if hasattr(t, 'model_dump') else dict(t) for t in (req.tabs or [])],
 			tab_layouts=req.tab_layouts,
 			last_active_tab=req.last_active_tab,
+			hidden=req.hidden,
 		)
 		return {"id": did, "name": req.name, "version": ver}
 	except Exception as exc:

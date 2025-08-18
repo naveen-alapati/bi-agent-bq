@@ -44,8 +44,8 @@ export default function Home() {
   const [tourRun, setTourRun] = useState(false)
   const homeTourDone = Cookies.get('tour_home_done') === '1'
   const homeSteps: Step[] = [
-    { target: '.topbar .toolbar .btn.btn-accent', content: 'Open CXO AI Assist to chat and “Generate CXO Summary”.', disableBeacon: true, placement: 'bottom' },
-    { target: '.topbar .toolbar button.btn', content: 'Export CXO Summary as PDF for current or all dashboards.', placement: 'bottom' },
+    { target: '[data-tour="home-cxo"]', content: 'Open CXO AI Assist to chat and “Generate CXO Summary”.', disableBeacon: true, placement: 'bottom' },
+    { target: '[data-tour="home-export"]', content: 'Export CXO Summary as PDF for current or all dashboards.', placement: 'bottom' },
   ]
   useEffect(() => { if (!homeTourDone) setTourRun(true) }, [])
   const onHomeTourCb = (data: CallBackProps) => {
@@ -56,9 +56,10 @@ export default function Home() {
   }
 
   useEffect(() => { api.listDashboards().then((rows) => {
-    // dedupe by name, keep latest updated_at
+    // dedupe by name, keep latest updated_at, but preserve default flag if known
     const byName: Record<string, any> = {}
     for (const d of rows || []) {
+      if (d.hidden) continue
       const key = d.name
       const prev = byName[key]
       if (!prev) byName[key] = d
@@ -73,7 +74,9 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       const def = await api.getDefaultDashboard().catch(() => null)
-      if (def) loadDashboard(def)
+      if (def) {
+        await loadDashboard(def)
+      }
     })()
   }, [])
 
@@ -486,9 +489,9 @@ export default function Home() {
           {active && <span className="badge">{active.name} v{active.version}</span>}
         </div>
         <div className="toolbar">
-          <button className="btn btn-accent" onClick={openCxo}>CXO AI Assist</button>
+          <button className="btn btn-accent" data-tour="home-cxo" onClick={openCxo}>CXO AI Assist</button>
           <div style={{ position: 'relative' }}>
-            <button className="btn" onClick={() => setExportOpen(o => !o)}>Export CXO Summary ▾</button>
+            <button className="btn" data-tour="home-export" onClick={() => setExportOpen(o => !o)}>Export CXO Summary ▾</button>
             {exportOpen && (
               <div style={{ position: 'absolute', right: 0, top: '110%', background: 'var(--card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', borderRadius: 8, zIndex: 20 }}>
                 <button className="btn" onClick={() => { setExportOpen(false); exportCurrentDashboardPDF() }} style={{ display: 'block', width: '100%' }}>Current Dashboard (PDF)</button>

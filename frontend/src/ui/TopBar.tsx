@@ -5,7 +5,6 @@ export function TopBar({
   version,
   onNameChange,
   onSave,
-  onSaveAs,
   globalDate,
   onGlobalDateChange,
   theme,
@@ -19,7 +18,6 @@ export function TopBar({
   version?: string
   onNameChange: (v: string) => void
   onSave: () => void
-  onSaveAs: () => void
   globalDate: { from?: string; to?: string }
   onGlobalDateChange: (next: { from?: string; to?: string }) => void
   theme: 'light' | 'dark'
@@ -58,8 +56,7 @@ export function TopBar({
         {version && <span className="badge">v{version}</span>}
         {dirty ? (
           <>
-            <button className="btn btn-primary" onClick={onSave}>Save</button>
-            <button className="btn btn-ghost" onClick={onSaveAs}>Save As</button>
+            <button className="btn btn-primary" data-tour="editor-save" onClick={onSave}>Save</button>
           </>
         ) : null}
       </div>
