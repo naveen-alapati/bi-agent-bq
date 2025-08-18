@@ -10,6 +10,8 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 import { createRoot } from 'react-dom/client'
+import Joyride, { CallBackProps, STATUS, Step } from 'react-joyride'
+import Cookies from 'js-cookie'
 
 export default function Home() {
   const [dashboards, setDashboards] = useState<any[]>([])
@@ -39,6 +41,19 @@ export default function Home() {
   const [chatSize, setChatSize] = useState<{ w: number; h: number }>({ w: 520, h: 0 })
   const feedLayerRef = useRef<HTMLDivElement | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
+  const [tourRun, setTourRun] = useState(false)
+  const homeTourDone = Cookies.get('tour_home_done') === '1'
+  const homeSteps: Step[] = [
+    { target: '.topbar .toolbar .btn.btn-accent', content: 'Open CXO AI Assist to chat and “Generate CXO Summary”.', disableBeacon: true, placement: 'bottom' },
+    { target: '.topbar .toolbar button.btn', content: 'Export CXO Summary as PDF for current or all dashboards.', placement: 'bottom' },
+  ]
+  useEffect(() => { if (!homeTourDone) setTourRun(true) }, [])
+  const onHomeTourCb = (data: CallBackProps) => {
+    const { status } = data
+    if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
+      setTourRun(false); Cookies.set('tour_home_done', '1', { expires: 180 })
+    }
+  }
 
   useEffect(() => { api.listDashboards().then((rows) => {
     // dedupe by name, keep latest updated_at
@@ -460,6 +475,7 @@ export default function Home() {
 
   return (
     <div>
+      <Joyride steps={homeSteps} run={tourRun} continuous showSkipButton hideCloseButton styles={{ options: { primaryColor: '#239BA7', zIndex: 10060 } }} callback={onHomeTourCb} />
       <div className="toast-container">
         {toasts.map(t => (<div key={t.id} className={`toast ${t.type==='success'?'toast-success':'toast-error'}`}>{t.msg}</div>))}
       </div>
