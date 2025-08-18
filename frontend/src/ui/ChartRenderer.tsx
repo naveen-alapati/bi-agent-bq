@@ -23,15 +23,16 @@ export function ChartRenderer({ chart, rows, onSelect }: { chart: any, rows: any
   // Simple card renderer for single metric KPIs
   if ((chart.chart_type === 'card') || (chart.expected_schema && /card|single/i.test(chart.expected_schema))) {
     const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
+    const arr = Array.isArray(rows) ? rows : []
     let value: number | string | null = null
-    if (rows && rows.length) {
-      const r = rows[0] || {}
+    if (arr.length) {
+      const r = (arr[0] || {}) as any
       if (typeof r.value === 'number') value = r.value
       else if (typeof r.y === 'number') value = r.y
       else {
         // find first numeric field
-        const numKey = Object.keys(r).find(k => typeof (r as any)[k] === 'number')
-        value = typeof numKey !== 'undefined' ? (r as any)[numKey!] : null
+        const numKey = Object.keys(r).find(k => typeof r[k] === 'number')
+        value = typeof numKey !== 'undefined' ? r[numKey!] : null
       }
     }
     const display = value == null ? '—' : (typeof value === 'number' ? fmt.format(value) : String(value))
