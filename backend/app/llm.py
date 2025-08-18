@@ -6,7 +6,8 @@ import requests
 
 class LLMClient:
     def __init__(self) -> None:
-        self.provider = os.getenv("LLM_PROVIDER", "vertex")  # vertex | openai | gemini
+        # Prefer explicit provider; otherwise default to gemini if key present, else vertex
+        self.provider = os.getenv("LLM_PROVIDER") or ("gemini" if os.getenv("GEMINI_API_KEY") else "vertex")
         self.vertex_location = os.getenv("VERTEX_LOCATION", os.getenv("BQ_LOCATION", "us-central1"))
         self.vertex_model = os.getenv("VERTEX_LLM_MODEL", "gemini-1.5-pro-001")
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -34,7 +35,7 @@ class LLMClient:
         prompt = f"SYSTEM: {system_prompt}\n\nINPUT_DATA: {user_prompt}"
         result = model.generate_content(prompt)
         text = result.candidates[0].content.parts[0].text
-        return json.loads(text)
+        return self._parse_json_text(text)
 
     def _generate_openai(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         from openai import OpenAI
@@ -45,16 +46,40 @@ class LLMClient:
         ]
         resp = client.chat.completions.create(model=self.openai_model, messages=messages, response_format={"type": "json_object"})
         text = resp.choices[0].message.content
-        return json.loads(text)
+        return self._parse_json_text(text)
 
     def _parse_json_text(self, text: str) -> Dict[str, Any]:
-        s = text.strip()
+        s = (text or "").strip()
         # strip code fences if present
         if s.startswith("```"):
             s = s.strip('`')
             if s.startswith("json"):
                 s = s[4:].strip()
-        return json.loads(s)
+        # try direct parse
+        try:
+            return json.loads(s)
+        except Exception:
+            pass
+        # heuristic: extract first balanced JSON object
+        depth = 0
+        start = -1
+        for i, ch in enumerate(s):
+            if ch == '{':
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == '}':
+                if depth > 0:
+                    depth -= 1
+                    if depth == 0 and start != -1:
+                        candidate = s[start:i+1]
+                        try:
+                            return json.loads(candidate)
+                        except Exception:
+                            start = -1
+                            continue
+        # fallback empty
+        return {}
 
     def _generate_gemini(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         if not self.gemini_api_key:
@@ -71,10 +96,13 @@ class LLMClient:
                 }
             ],
             "generationConfig": {
-                "responseMimeType": "application/json"
+                "responseMimeType": "application/json",
+                "temperature": 0.2,
+                "topP": 0.95,
+                "maxOutputTokens": 2048
             }
         }
-        resp = requests.post(f"{endpoint}?key={self.gemini_api_key}", headers=headers, data=json.dumps(body), timeout=20)
+        resp = requests.post(f"{endpoint}?key={self.gemini_api_key}", headers=headers, data=json.dumps(body), timeout=60)
         if resp.status_code != 200:
             raise RuntimeError(f"Gemini API error {resp.status_code}: {resp.text}")
         data = resp.json()
@@ -109,12 +137,13 @@ class LLMClient:
             headers = {"Content-Type": "application/json"}
             body = {
                 "contents": [{"role": "user", "parts": [{"text": f"SYSTEM: {system}\n\nINPUT_DATA: {user}"}]}],
-                "generationConfig": {"responseMimeType": "application/json"}
+                "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2, "topP": 0.95, "maxOutputTokens": 1024}
             }
-            resp = requests.post(f"{endpoint}?key={self.gemini_api_key}", headers=headers, data=json.dumps(body), timeout=20)
+            resp = requests.post(f"{endpoint}?key={self.gemini_api_key}", headers=headers, data=json.dumps(body), timeout=60)
             data = resp.json()
             text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
-            return json.loads(text).get("sql", original_sql)
+            parsed = self._parse_json_text(text)
+            return parsed.get("sql", original_sql)
         raise RuntimeError("Unsupported provider for edit_sql")
 
     def diagnostics(self) -> Dict[str, Any]:
