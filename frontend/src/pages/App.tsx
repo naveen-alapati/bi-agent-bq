@@ -341,11 +341,38 @@ export default function App() {
     if (res.kpi) {
       const idx = kpis.findIndex(x => x.id === aiEditKpi.id)
       if (idx >= 0) {
+        // normalize updated kpi
+        const prevK = kpis[idx]
+        const upd: any = { ...prevK, ...res.kpi }
+        if (!upd.id) upd.id = prevK.id
+        if ((upd.chart_type || '').toLowerCase() === 'card') {
+          upd.engine = 'none'
+          upd.vega_lite_spec = null
+        }
+        const oldId = prevK.id
+        const newId = upd.id
+        // if id changed, update layouts and rowsByKpi mappings first
+        if (newId !== oldId) {
+          setLayouts(lays => lays.map(l => l.i === oldId ? { ...l, i: newId } : l))
+          setTabLayouts(prev => {
+            const copy: Record<string, Layout[]> = { ...prev }
+            for (const key of Object.keys(copy)) {
+              copy[key] = (copy[key] || []).map(l => l.i === oldId ? { ...l, i: newId } : l)
+            }
+            return copy
+          })
+          setRowsByKpi(prev => {
+            const out = { ...prev }
+            if (out[oldId] && !out[newId]) out[newId] = out[oldId]
+            delete out[oldId]
+            return out
+          })
+        }
         const next = [...kpis]
-        next[idx] = { ...next[idx], ...res.kpi }
+        next[idx] = upd
         setKpis(next)
         setDirty(true)
-        setAiEditKpi(next[idx])
+        setAiEditKpi(upd)
       }
     }
     setAiTyping(false)
