@@ -204,10 +204,11 @@ export default function App() {
       tabs: [activeTab],
     }
     setKpis(prev => [...prev, k])
-    // add to current tab layout
     setLayouts(prev => [...prev, { i: id, x: 0, y: Infinity, w: 6, h: 8 }])
     setTabLayouts(prev => ({ ...prev, [activeTab]: [ ...(prev[activeTab] || []), { i: id, x: 0, y: Infinity, w: 6, h: 8 } ] }))
     setDirty(true)
+    // auto-run
+    setTimeout(() => runKpi(k), 100)
   }
 
   function addTab() {
@@ -219,6 +220,7 @@ export default function App() {
     setTabs(next)
     setActiveTab(id)
     setTabLayouts(prev => ({ ...prev, [id]: [] }))
+    setDirty(true)
   }
 
   function removeTab(id: string) {
@@ -314,6 +316,15 @@ export default function App() {
 
   const visibleKpis = kpis.filter(k => (k.tabs && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview'))
   const activeLayout = tabLayouts[activeTab] || layouts
+
+  // auto-run all charts on active tab when loaded or tab changes (first time)
+  const [ranTabs, setRanTabs] = useState<Record<string, boolean>>({})
+  useEffect(() => {
+    const toRun = kpis.filter(k => (k.tabs && k.tabs.includes(activeTab)))
+    if (!ranTabs[activeTab] && toRun.length) {
+      (async () => { for (const k of toRun) { await runKpi(k) } setRanTabs(prev => ({ ...prev, [activeTab]: true })) })()
+    }
+  }, [activeTab, kpis])
 
   return (
     <div>
