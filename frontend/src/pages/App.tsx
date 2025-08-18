@@ -12,6 +12,8 @@ import { TopBar } from '../ui/TopBar'
 import { KPICatalog } from '../ui/KPICatalog'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import Joyride, { CallBackProps, STATUS, Step } from 'react-joyride'
+import Cookies from 'js-cookie'
 
 export default function App() {
   const params = useParams()
@@ -54,6 +56,22 @@ export default function App() {
   const [aiChat, setAiChat] = useState<{ role: 'assistant'|'user'; text: string }[]>([])
   const [aiInput, setAiInput] = useState('')
   const [aiTyping, setAiTyping] = useState(false)
+  const [tourRun, setTourRun] = useState(false)
+  const editorTourDone = Cookies.get('tour_editor_done') === '1'
+  const editorSteps: Step[] = [
+    { target: '.topbar .btn.btn-primary', content: 'Save appears only after changes. Use Set as Default to load this dashboard first on Home.', placement: 'bottom' },
+    { target: '.panel .section-title', content: 'Select tables and Analyze to generate KPIs; they auto-save to KPI Catalog.', placement: 'right' },
+    { target: '.panel .scroll', content: 'KPI Catalog: Add KPIs; they land in the current tab and auto-run.', placement: 'right' },
+    { target: '.layout', content: 'Drag/resize cards. Only the header acts as drag handle so toolbar buttons won\'t drag.', placement: 'top' },
+    { target: '.card .card-actions .btn.btn-sm:last-child', content: 'Open AI Edit for interactive refinement with readable Markdown replies.', placement: 'left' },
+  ]
+  useEffect(() => { if (!editorTourDone) setTourRun(true) }, [])
+  const onEditorTourCb = (data: CallBackProps) => {
+    const { status } = data
+    if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
+      setTourRun(false); Cookies.set('tour_editor_done', '1', { expires: 180 })
+    }
+  }
 
   function applyPalette(p: { primary: string; accent: string; surface: string; warn: string }) {
     const r = document.documentElement
@@ -328,6 +346,7 @@ export default function App() {
 
   return (
     <div>
+      <Joyride steps={editorSteps} run={tourRun} continuous showSkipButton hideCloseButton styles={{ options: { primaryColor: '#239BA7', zIndex: 10060 } }} callback={onEditorTourCb} />
       <div className="toast-container">
         {toasts.map(t => (<div key={t.id} className={`toast ${t.type==='success'?'toast-success':'toast-error'}`}>{t.msg}</div>))}
       </div>

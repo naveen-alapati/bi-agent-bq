@@ -179,11 +179,15 @@ def edit_kpi(payload: Dict[str, str]):
 			maybe_kpi = resp.get('kpi') or {}
 			if isinstance(maybe_kpi, dict):
 				for key in ["name","short_description","chart_type","expected_schema","engine","vega_lite_spec","sql","filter_date_column"]:
-					if key in maybe_kpi and maybe_kpi[key] is not None:
+					if key in maybe_kpi:
 						updated_kpi[key] = maybe_kpi[key]
 			markdown = resp.get('markdown') or ''
 		else:
 			markdown = ""
+		# If user intends a 'card' chart, ensure vega spec is removed
+		if (updated_kpi.get('chart_type') or '').lower() == 'card':
+			updated_kpi['engine'] = 'none'
+			updated_kpi['vega_lite_spec'] = None
 		# Fallback: if no change produced, try SQL-only edit
 		if updated_kpi.get('sql') == original_sql or not updated_kpi.get('sql'):
 			try:

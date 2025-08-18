@@ -20,6 +20,32 @@ export function ChartRenderer({ chart, rows, onSelect }: { chart: any, rows: any
     return () => obs.disconnect()
   }, [])
 
+  // Simple card renderer for single metric KPIs
+  if ((chart.chart_type === 'card') || (chart.expected_schema && /card|single/i.test(chart.expected_schema))) {
+    const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
+    let value: number | string | null = null
+    if (rows && rows.length) {
+      const r = rows[0] || {}
+      if (typeof r.value === 'number') value = r.value
+      else if (typeof r.y === 'number') value = r.y
+      else {
+        // find first numeric field
+        const numKey = Object.keys(r).find(k => typeof (r as any)[k] === 'number')
+        value = typeof numKey !== 'undefined' ? (r as any)[numKey!] : null
+      }
+    }
+    const display = value == null ? '—' : (typeof value === 'number' ? fmt.format(value) : String(value))
+    const title = chart.name || 'KPI'
+    return (
+      <div ref={wrapRef} className="no-drag" style={{ width: '100%', height: '100%', minHeight: 160, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 6 }}>{title}</div>
+          <div style={{ fontSize: Math.max(24, Math.min(64, size.w * 0.12)), fontWeight: 800, letterSpacing: '0.5px' }}>{display}</div>
+        </div>
+      </div>
+    )
+  }
+
   useEffect(() => {
     if (!(chart.engine === 'vega-lite' && chart.vega_lite_spec && vegaRef.current)) return
     if (size.w <= 0 || size.h <= 0) return

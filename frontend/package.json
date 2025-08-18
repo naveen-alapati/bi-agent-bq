@@ -23,7 +23,9 @@
     "react-syntax-highlighter": "15.5.0",
     "react-router-dom": "6",
     "html2canvas": "1.4.1",
-    "jspdf": "2.5.2"
+    "jspdf": "2.5.2",
+    "react-joyride": "2.9.3",
+    "js-cookie": "3.0.5"
   },
   "devDependencies": {
     "@types/react": "18.3.3",
