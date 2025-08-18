@@ -43,7 +43,11 @@ export const api = {
   },
   async editKpi(kpi: any, instruction: string) {
     const r = await axios.post('/api/kpi/edit', { kpi, instruction })
-    return r.data.kpi
+    return r.data as { kpi: any; markdown: string }
+  },
+  async editKpiChat(kpi: any, message: string, history?: { role: string; content: string }[], context?: any) {
+    const r = await axios.post('/api/kpi/edit_chat', { kpi, message, history, context })
+    return r.data as { reply: string; kpi?: any }
   },
   async setDefaultDashboard(id: string) {
     const r = await axios.post('/api/dashboards/default', { id })
