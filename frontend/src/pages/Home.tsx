@@ -3,6 +3,10 @@ import { api } from '../services/api'
 import GridLayout, { Layout } from 'react-grid-layout'
 import { ChartRenderer } from '../ui/ChartRenderer'
 import '../styles.css'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
 export default function Home() {
   const [dashboards, setDashboards] = useState<any[]>([])
@@ -26,6 +30,10 @@ export default function Home() {
   const [convId, setConvId] = useState<string>('')
   const [chat, setChat] = useState<{ role: 'assistant'|'user'; text: string }[]>([])
   const [input, setInput] = useState('')
+  const chatWrapRef = useRef<HTMLDivElement | null>(null)
+  const [chatPos, setChatPos] = useState<{ x: number; y: number }>({ x: 16, y: 16 })
+  const [chatSize, setChatSize] = useState<{ w: number; h: number }>({ w: 520, h: 0 })
+  const feedLayerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => { api.listDashboards().then((rows) => {
     // dedupe by name, keep latest updated_at
@@ -95,6 +103,24 @@ export default function Home() {
       setChat([{ role: 'assistant', text: welcome }])
     }
     setCxoOpen(true); setCxoMin(false)
+    setTimeout(() => animateFeedFromCharts(), 120)
+  }
+
+  const [showFeed, setShowFeed] = useState(false)
+
+  async function quickSummary() {
+    if (!active) return
+    const context = {
+      dashboard_name: active.name,
+      active_tab: activeTab,
+      kpis: (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview')).map((k:any) => ({ id: k.id, name: k.name, rows: rowsByKpi[k.id] || [] }))
+    }
+    const id = convId || await api.cxoStart(active.id, active.name, activeTab)
+    if (!convId) setConvId(id)
+    const msg = 'Generate executive summary from available data.'
+    setChat(prev => [...prev, { role: 'user', text: msg }])
+    const reply = await api.cxoSend(id, msg, context)
+    setChat(prev => [...prev, { role: 'assistant', text: reply }])
   }
 
   async function sendCxo() {
@@ -122,6 +148,57 @@ export default function Home() {
     return (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview'))
   }, [active, activeTab])
 
+  function onDragChat(e: React.MouseEvent) {
+    const startX = e.clientX, startY = e.clientY
+    const origin = { ...chatPos }
+    function move(ev: MouseEvent) {
+      setChatPos({ x: Math.max(8, origin.x + (ev.clientX - startX)), y: Math.max(8, origin.y + (ev.clientY - startY)) })
+    }
+    function up() { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
+  function animateFeedFromCharts() {
+    try {
+      const overlay = feedLayerRef.current
+      const chatEl = chatWrapRef.current
+      if (!overlay || !chatEl) return
+      const chatRect = chatEl.getBoundingClientRect()
+      const destX = chatRect.left + chatRect.width - 60
+      const destY = chatRect.top + 40
+      const cards = Array.from(document.querySelectorAll('.layout .card')) as HTMLElement[]
+      const take = cards.slice(0, 8)
+      take.forEach((card, idx) => {
+        const r = card.getBoundingClientRect()
+        const sx = r.left + r.width / 2
+        const sy = r.top + r.height / 2
+        const dot = document.createElement('div')
+        dot.style.position = 'fixed'
+        dot.style.left = `${sx}px`
+        dot.style.top = `${sy}px`
+        dot.style.width = '10px'
+        dot.style.height = '10px'
+        dot.style.borderRadius = '50%'
+        dot.style.background = idx % 2 === 0 ? 'var(--primary)' : 'var(--accent)'
+        dot.style.boxShadow = '0 0 12px rgba(0,0,0,0.15)'
+        dot.style.transition = 'transform 750ms cubic-bezier(0.22, 1, 0.36, 1), opacity 900ms ease'
+        dot.style.opacity = '0.9'
+        overlay.appendChild(dot)
+        // trigger
+        const dx = destX - sx
+        const dy = destY - sy
+        setTimeout(() => {
+          dot.style.transform = `translate(${dx}px, ${dy}px)`
+          dot.style.opacity = '0'
+        }, 10 + idx * 60)
+        setTimeout(() => {
+          try { overlay.removeChild(dot) } catch {}
+        }, 1100 + idx * 60)
+      })
+    } catch {}
+  }
+
   return (
     <div>
       <div className="toast-container">
@@ -140,28 +217,45 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Floating Chat */}
+      {/* Floating Chat (side dock, draggable) */}
       {cxoOpen && (
-        <div style={{ position: 'fixed', right: 16, bottom: 16, width: cxoMin ? 280 : 420, height: cxoMin ? 54 : '70vh', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)', display: 'flex', flexDirection: 'column', zIndex: 9998 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 8, borderBottom: '1px solid var(--border)' }}>
+        <div ref={chatWrapRef} style={{ position: 'fixed', right: chatPos.x, bottom: chatPos.y, width: cxoMin ? 340 : 600, height: cxoMin ? 64 : '70vh', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)', display: 'flex', flexDirection: 'column', zIndex: 9998 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 10, borderBottom: '1px solid var(--border)', cursor: 'move' }} onMouseDown={onDragChat}>
             <div className="card-title">CXO AI Assist</div>
             <div className="toolbar">
+              <button className="btn btn-sm" onClick={quickSummary}>Generate CXO Summary</button>
               <button className="btn btn-sm" onClick={() => setCxoMin(m => !m)}>{cxoMin ? '▣' : '–'}</button>
               <button className="btn btn-sm" onClick={() => setCxoOpen(false)}>✕</button>
             </div>
           </div>
           {!cxoMin && (
             <>
-              <div style={{ flex: 1, overflow: 'auto', padding: 8 }}>
+              <div style={{ position: 'relative', flex: 1, overflow: 'auto', padding: 12 }}>
+                <div ref={feedLayerRef} style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 9997 }} />
                 {chat.map((m, i) => (
-                  <div key={i} style={{ marginBottom: 10, textAlign: m.role==='user' ? 'right':'left' }}>
-                    <div style={{ display: 'inline-block', padding: '8px 12px', borderRadius: 12, background: m.role==='user' ? 'var(--primary)' : 'var(--surface)', color: m.role==='user' ? '#fff' : 'var(--fg)' }}>
-                      {m.text}
+                  <div key={i} style={{ marginBottom: 12, textAlign: m.role==='user' ? 'right':'left' }}>
+                    <div style={{ display: 'inline-block', padding: '12px 14px', borderRadius: 12, background: m.role==='user' ? 'var(--primary)' : 'var(--surface)', color: m.role==='user' ? '#fff' : 'var(--fg)', maxWidth: 680, textAlign: 'left' }}>
+                      {m.role==='assistant' ? (
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+                          code({node, inline, className, children, ...props}) {
+                            const match = /language-(\w+)/.exec(className || '')
+                            return !inline && match ? (
+                              <SyntaxHighlighter style={oneDark} language={match[1]} PreTag="div" {...props}>
+                                {String(children).replace(/\n$/, '')}
+                              </SyntaxHighlighter>
+                            ) : (
+                              <code className={className} {...props}>{children}</code>
+                            )
+                          }
+                        }}>
+                          {m.text}
+                        </ReactMarkdown>
+                      ) : m.text}
                     </div>
                   </div>
                 ))}
               </div>
-              <div style={{ padding: 8, borderTop: '1px solid var(--border)', display: 'flex', gap: 6 }}>
+              <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', gap: 8 }}>
                 <input className="input" placeholder="Ask anything..." value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key==='Enter') sendCxo() }} style={{ flex: 1 }} />
                 <button className="btn btn-primary" onClick={sendCxo}>Send</button>
               </div>
