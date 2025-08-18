@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import html2canvas from 'html2canvas'
 
 export default function Home() {
   const [dashboards, setDashboards] = useState<any[]>([])
@@ -103,7 +104,7 @@ export default function Home() {
       setChat([{ role: 'assistant', text: welcome }])
     }
     setCxoOpen(true); setCxoMin(false)
-    setTimeout(() => animateFeedFromCharts(), 120)
+    setTimeout(() => animateMiniCharts(), 200)
   }
 
   const [showFeed, setShowFeed] = useState(false)
@@ -148,6 +149,49 @@ export default function Home() {
     return (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview'))
   }, [active, activeTab])
 
+  // Snapshot and animate mini charts into chat
+  async function animateMiniCharts() {
+    try {
+      const overlay = feedLayerRef.current
+      const chatEl = chatWrapRef.current
+      if (!overlay || !chatEl) return
+      const chatRect = chatEl.getBoundingClientRect()
+      const destX = chatRect.left + chatRect.width - 80
+      const destY = chatRect.top + 60
+      const cards = Array.from(document.querySelectorAll('.layout .card')) as HTMLElement[]
+      const take = cards.slice(0, 6)
+      for (let idx = 0; idx < take.length; idx++) {
+        const card = take[idx]
+        const r = card.getBoundingClientRect()
+        const sx = r.left + 12
+        const sy = r.top + 12
+        // snapshot the chart area (inner container)
+        const target = card.querySelector('.no-drag') as HTMLElement
+        if (!target) continue
+        const canvas = await html2canvas(target, { backgroundColor: null, scale: 0.3 })
+        const img = document.createElement('img')
+        img.src = canvas.toDataURL('image/png')
+        img.style.position = 'fixed'
+        img.style.left = `${sx}px`
+        img.style.top = `${sy}px`
+        img.style.width = `${Math.max(120, Math.min(200, r.width * 0.3))}px`
+        img.style.height = 'auto'
+        img.style.borderRadius = '10px'
+        img.style.boxShadow = '0 8px 24px rgba(0,0,0,0.18)'
+        img.style.opacity = '0.95'
+        img.style.transition = 'transform 1100ms cubic-bezier(.2,.8,.2,1), opacity 1200ms ease'
+        overlay.appendChild(img)
+        const dx = destX - sx
+        const dy = destY - sy
+        setTimeout(() => {
+          img.style.transform = `translate(${dx}px, ${dy}px) scale(0.6)`
+          img.style.opacity = '0'
+        }, 30 + idx * 140)
+        setTimeout(() => { try { overlay.removeChild(img) } catch {} }, 1400 + idx * 140)
+      }
+    } catch {}
+  }
+
   function onDragChat(e: React.MouseEvent) {
     const startX = e.clientX, startY = e.clientY
     const origin = { ...chatPos }
@@ -157,46 +201,6 @@ export default function Home() {
     function up() { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
-  }
-
-  function animateFeedFromCharts() {
-    try {
-      const overlay = feedLayerRef.current
-      const chatEl = chatWrapRef.current
-      if (!overlay || !chatEl) return
-      const chatRect = chatEl.getBoundingClientRect()
-      const destX = chatRect.left + chatRect.width - 60
-      const destY = chatRect.top + 40
-      const cards = Array.from(document.querySelectorAll('.layout .card')) as HTMLElement[]
-      const take = cards.slice(0, 8)
-      take.forEach((card, idx) => {
-        const r = card.getBoundingClientRect()
-        const sx = r.left + r.width / 2
-        const sy = r.top + r.height / 2
-        const dot = document.createElement('div')
-        dot.style.position = 'fixed'
-        dot.style.left = `${sx}px`
-        dot.style.top = `${sy}px`
-        dot.style.width = '10px'
-        dot.style.height = '10px'
-        dot.style.borderRadius = '50%'
-        dot.style.background = idx % 2 === 0 ? 'var(--primary)' : 'var(--accent)'
-        dot.style.boxShadow = '0 0 12px rgba(0,0,0,0.15)'
-        dot.style.transition = 'transform 750ms cubic-bezier(0.22, 1, 0.36, 1), opacity 900ms ease'
-        dot.style.opacity = '0.9'
-        overlay.appendChild(dot)
-        // trigger
-        const dx = destX - sx
-        const dy = destY - sy
-        setTimeout(() => {
-          dot.style.transform = `translate(${dx}px, ${dy}px)`
-          dot.style.opacity = '0'
-        }, 10 + idx * 60)
-        setTimeout(() => {
-          try { overlay.removeChild(dot) } catch {}
-        }, 1100 + idx * 60)
-      })
-    } catch {}
   }
 
   return (
