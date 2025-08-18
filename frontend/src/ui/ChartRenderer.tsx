@@ -34,6 +34,15 @@ export function ChartRenderer({ chart, rows, onSelect }: { chart: any, rows: any
         const numKey = Object.keys(r).find(k => typeof r[k] === 'number')
         value = typeof numKey !== 'undefined' ? r[numKey!] : null
       }
+      // if still null and multiple rows, try summing preferred numeric keys
+      if (value == null && arr.length > 1) {
+        const prefer = ['value', 'y']
+        const key = prefer.find(k => typeof (arr[0] as any)[k] === 'number') || Object.keys(arr[0] || {}).find(k => typeof (arr[0] as any)[k] === 'number')
+        if (key) {
+          const sum = arr.reduce((acc, it) => acc + (typeof (it as any)[key] === 'number' ? (it as any)[key] : 0), 0)
+          if (isFinite(sum)) value = sum
+        }
+      }
     }
     const display = value == null ? '—' : (typeof value === 'number' ? fmt.format(value) : String(value))
     const title = chart.name || 'KPI'
