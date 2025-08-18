@@ -610,3 +610,20 @@ class BigQueryService:
         )
         rows = self.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("cid", "STRING", conversation_id)]), location=self.location)
         return [dict(r) for r in rows]
+
+    def delete_dashboard(self, dataset_id: str = "analytics_dash", dashboard_id: Optional[str] = None, name: Optional[str] = None, all_versions: bool = False) -> int:
+        table = self.ensure_dashboards_table(dataset_id)
+        params: list = []
+        if all_versions and name:
+            sql = f"DELETE FROM `{table}` WHERE name=@n"
+            params = [bigquery.ScalarQueryParameter("n", "STRING", name)]
+        elif dashboard_id:
+            sql = f"DELETE FROM `{table}` WHERE id=@id"
+            params = [bigquery.ScalarQueryParameter("id", "STRING", dashboard_id)]
+        else:
+            # nothing to do
+            return 0
+        job = self.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=params), location=self.location)
+        result = list(job)
+        # BigQuery DML doesn't return affected rows directly here; return 1 as success
+        return 1

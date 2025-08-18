@@ -544,6 +544,26 @@ export default function App() {
               <input type="checkbox" checked={hidden} onChange={(e) => { setHidden(e.target.checked); setDirty(true) }} />
               <span className="card-subtitle">Hide from Home</span>
             </label>
+            <div className="toolbar" style={{ marginLeft: 8, gap: 6 }}>
+              <button className="btn btn-sm btn-outline" onClick={async () => {
+                if (!routeId) { toast('error','Open a dashboard to delete'); return }
+                if (!confirm('Delete this version only? This cannot be undone.')) return
+                try {
+                  await fetch(`/api/dashboards/${encodeURIComponent(routeId)}`, { method: 'DELETE' })
+                  toast('success','Deleted')
+                  navigate('/')
+                } catch(e:any){ toast('error', e?.message||'Failed') }
+              }}>Delete Version</button>
+              <button className="btn btn-sm btn-outline" onClick={async () => {
+                if (!routeId) { toast('error','Open a dashboard to delete'); return }
+                if (!confirm('Delete ALL versions of this dashboard name? This cannot be undone.')) return
+                try {
+                  await fetch(`/api/dashboards/${encodeURIComponent(routeId)}?all_versions=true`, { method: 'DELETE' })
+                  toast('success','Deleted all versions')
+                  navigate('/')
+                } catch(e:any){ toast('error', e?.message||'Failed') }
+              }}>Delete All Versions</button>
+            </div>
           </div>
 
           <div className="tabs-bar">
