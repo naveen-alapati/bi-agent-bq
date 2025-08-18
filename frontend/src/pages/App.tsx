@@ -527,7 +527,7 @@ export default function App() {
                 <button className="btn btn-sm" onClick={() => setAiEditOpen(false)}>✕</button>
               </div>
             </div>
-            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, minHeight: 0 }}>
               <div style={{ borderRight: '1px solid var(--border)', padding: 12, overflow: 'auto' }}>
                 {aiChat.map((m, i) => (
                   <div key={i} style={{ marginBottom: 12 }}>
@@ -542,7 +542,7 @@ export default function App() {
                 {aiEditKpi?.vega_lite_spec && <div className="card-subtitle" style={{ marginTop: 8 }}>Vega-Lite spec present</div>}
               </div>
             </div>
-            <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', gap: 8 }}>
+            <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', gap: 8, position: 'sticky', bottom: 0, background: 'var(--card)' }}>
               <input className="input" placeholder="Describe the change..." value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyDown={e => { if (e.key==='Enter') sendAiEdit() }} style={{ flex: 1 }} />
               <button className="btn btn-primary" onClick={sendAiEdit}>Send</button>
             </div>

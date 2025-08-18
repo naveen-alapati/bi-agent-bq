@@ -22,7 +22,8 @@
     "remark-gfm": "4.0.0",
     "react-syntax-highlighter": "15.5.0",
     "react-router-dom": "6",
-    "html2canvas": "1.4.1"
+    "html2canvas": "1.4.1",
+    "jspdf": "2.5.2"
   },
   "devDependencies": {
     "@types/react": "18.3.3",
