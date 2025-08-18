@@ -8,6 +8,8 @@ import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import html2canvas from 'html2canvas'
+import jsPDF from 'jspdf'
+import { createRoot } from 'react-dom/client'
 
 export default function Home() {
   const [dashboards, setDashboards] = useState<any[]>([])
@@ -35,6 +37,7 @@ export default function Home() {
   const [chatPos, setChatPos] = useState<{ x: number; y: number }>({ x: 16, y: 16 })
   const [chatSize, setChatSize] = useState<{ w: number; h: number }>({ w: 520, h: 0 })
   const feedLayerRef = useRef<HTMLDivElement | null>(null)
+  const [exportOpen, setExportOpen] = useState(false)
 
   useEffect(() => { api.listDashboards().then((rows) => {
     // dedupe by name, keep latest updated_at
@@ -226,6 +229,145 @@ export default function Home() {
     setChat(prev => [...prev, { role: 'assistant', text: reply }])
   }
 
+  async function captureChartImage(card: HTMLElement): Promise<HTMLCanvasElement | null> {
+    const target = card.querySelector('.no-drag') as HTMLElement
+    if (!target) return null
+    try {
+      return await html2canvas(target, { backgroundColor: '#ffffff', scale: 2 })
+    } catch { return null }
+  }
+
+  async function renderKpiOffscreen(kpi: any, rows: any[]): Promise<HTMLCanvasElement | null> {
+    return new Promise(async (resolve) => {
+      try {
+        const holder = document.createElement('div')
+        holder.style.position = 'fixed'
+        holder.style.left = '-10000px'
+        holder.style.top = '0px'
+        holder.style.width = '800px'
+        holder.style.height = '360px'
+        holder.style.background = '#ffffff'
+        document.body.appendChild(holder)
+        const root = createRoot(holder)
+        root.render(React.createElement(ChartRenderer, { chart: kpi, rows }))
+        await new Promise(r => setTimeout(r, 600))
+        const canvas = await html2canvas(holder, { backgroundColor: '#ffffff', scale: 2 })
+        try { root.unmount() } catch {}
+        try { document.body.removeChild(holder) } catch {}
+        resolve(canvas)
+      } catch {
+        resolve(null)
+      }
+    })
+  }
+
+  function addSummaryPage(doc: jsPDF, title: string, mdText: string) {
+    const margin = 14
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(18)
+    doc.text('CXO Summary', margin, 20)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(11)
+    const dateStr = new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+    doc.text(dateStr, margin, 28)
+    doc.setFontSize(12)
+    const lines = doc.splitTextToSize(mdText.replace(/\r\n/g, '\n'), 180)
+    doc.text(lines as any, margin, 40)
+    doc.setDrawColor(230)
+    doc.line(margin, 36, 210 - margin, 36)
+    doc.setTextColor(0,0,238)
+    doc.textWithLink('Open Dashboard', 210 - margin - 42, 28, { url: 'https://analytics-kpi-poc-315425729064.asia-south1.run.app' })
+    doc.setTextColor(0,0,0)
+  }
+
+  async function exportCurrentDashboardPDF() {
+    if (!active) return
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
+    // Generate latest summary (current tab only)
+    const context = {
+      dashboard_name: active.name,
+      active_tab: activeTab,
+      kpis: (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview')).map((k:any) => ({ id: k.id, name: k.name, rows: rowsByKpi[k.id] || [] }))
+    }
+    const id = convId || await api.cxoStart(active.id, active.name, activeTab)
+    const summary = await api.cxoSend(id, 'Generate executive summary from available data.', context)
+    addSummaryPage(doc, 'CXO Summary', summary)
+    // Charts: 2 per page vertically on subsequent pages
+    const cards = Array.from(document.querySelectorAll('.layout .card')) as HTMLElement[]
+    const visible = (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview'))
+    let placed = 0
+    let slotIndex = 0
+    for (const k of visible) {
+      const card = cards.find(c => (c.getAttribute('data-grid') || '').includes(`\"i\":\"${k.id}\"`)) || cards.find(c => c.innerText.includes(k.name))
+      if (!card) continue
+      const canvas = await captureChartImage(card)
+      if (!canvas) continue
+      if (placed === 0) { /* summary is first page, start new page for charts */ doc.addPage() }
+      const imgW = 180, imgH = (canvas.height / canvas.width) * imgW
+      const ySlots = [20, 150]
+      const which = slotIndex % 2
+      doc.addImage(canvas.toDataURL('image/png'), 'PNG', 15, ySlots[which], imgW, Math.min(imgH, 120))
+      slotIndex++
+      if (slotIndex % 2 === 0) doc.addPage()
+      placed++
+    }
+    // remove trailing empty page if last addPage() created an extra
+    const totalPages = (doc as any).getNumberOfPages?.() || 0
+    if (totalPages > 0) {
+      // If the last page has no images (slotIndex was even and we added a new page), remove it
+      if (slotIndex % 2 === 0) {
+        (doc as any).deletePage(totalPages)
+      }
+    }
+    doc.save(`${active.name || 'dashboard'}-cxo-summary.pdf`)
+  }
+
+  async function exportAllDashboardsPDF() {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
+    let started = false
+    for (const d of dashboards) {
+      const full = await api.getDashboard(d.id)
+      const activeTabId = (full.last_active_tab || 'overview')
+      // latest summary for dashboard
+      const context = {
+        dashboard_name: full.name,
+        active_tab: activeTabId,
+        kpis: (full.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTabId) : activeTabId === 'overview')).map((k:any) => ({ id: k.id, name: k.name, rows: [] }))
+      }
+      const cid = await api.cxoStart(full.id, full.name, activeTabId)
+      const summary = await api.cxoSend(cid, 'Generate executive summary from available data.', context)
+      if (started) doc.addPage()
+      addSummaryPage(doc, 'CXO Summary', `# ${full.name}\n\n${summary}`)
+      started = true
+      // render charts offscreen (current tab only, as per requirement)
+      const visible = (full.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTabId) : activeTabId === 'overview'))
+      let slotIndex = 0
+      for (const k of visible) {
+        const rows = await api.runKpi(k.sql, undefined, k.filter_date_column, k.expected_schema)
+        const canvas = await renderKpiOffscreen(k, rows)
+        if (!canvas) continue
+        doc.addPage()
+        const imgW = 180, imgH = (canvas.height / canvas.width) * imgW
+        const ySlots = [20, 150]
+        doc.addImage(canvas.toDataURL('image/png'), 'PNG', 15, ySlots[0], imgW, Math.min(imgH, 120))
+        // place second slot if next exists
+        const idx = visible.indexOf(k)
+        if (visible[idx + 1]) {
+          const k2 = visible[idx + 1]
+          const rows2 = await api.runKpi(k2.sql, undefined, k2.filter_date_column, k2.expected_schema)
+          const canvas2 = await renderKpiOffscreen(k2, rows2)
+          if (canvas2) {
+            doc.addPage()
+            const imgH2 = (canvas2.height / canvas2.width) * imgW
+            doc.addImage(canvas2.toDataURL('image/png'), 'PNG', 15, ySlots[0], imgW, Math.min(imgH2, 120))
+          }
+        }
+        slotIndex += 2
+      }
+    }
+    doc.save(`all-dashboards-cxo-summary.pdf`)
+  }
+
   const layout: Layout[] = useMemo(() => {
     if (!active) return []
     const tl = (active.tab_layouts || {})
@@ -250,6 +392,15 @@ export default function Home() {
         </div>
         <div className="toolbar">
           <button className="btn btn-accent" onClick={openCxo}>CXO AI Assist</button>
+          <div style={{ position: 'relative' }}>
+            <button className="btn" onClick={() => setExportOpen(o => !o)}>Export CXO Summary ▾</button>
+            {exportOpen && (
+              <div style={{ position: 'absolute', right: 0, top: '110%', background: 'var(--card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', borderRadius: 8, zIndex: 20 }}>
+                <button className="btn" onClick={() => { setExportOpen(false); exportCurrentDashboardPDF() }} style={{ display: 'block', width: '100%' }}>Current Dashboard (PDF)</button>
+                <button className="btn" onClick={() => { setExportOpen(false); exportAllDashboardsPDF() }} style={{ display: 'block', width: '100%' }}>All Dashboards (PDF)</button>
+              </div>
+            )}
+          </div>
           <a className="btn" href="/editor">New Dashboard</a>
           {active && <a className="btn btn-primary" href={`/editor/${active.id}`}>Edit Dashboard</a>}
         </div>
