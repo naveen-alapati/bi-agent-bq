@@ -10,6 +10,8 @@ import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import { TopBar } from '../ui/TopBar'
 import { KPICatalog } from '../ui/KPICatalog'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 export default function App() {
   const params = useParams()
@@ -47,6 +49,10 @@ export default function App() {
   const defaultPalette = { primary: '#239BA7', accent: '#7ADAA5', surface: '#ECECBB', warn: '#E1AA36' }
   const [palette, setPalette] = useState<{ primary: string; accent: string; surface: string; warn: string }>(defaultPalette)
   const [dirty, setDirty] = useState<boolean>(false)
+  const [aiEditOpen, setAiEditOpen] = useState(false)
+  const [aiEditKpi, setAiEditKpi] = useState<any>(null)
+  const [aiChat, setAiChat] = useState<{ role: 'assistant'|'user'; text: string }[]>([])
+  const [aiInput, setAiInput] = useState('')
 
   function applyPalette(p: { primary: string; accent: string; surface: string; warn: string }) {
     const r = document.documentElement
@@ -273,6 +279,32 @@ export default function App() {
     setDragTabId(null)
   }
 
+  function openAiEdit(k: any) {
+    setAiEditKpi(k)
+    setAiChat([{ role: 'assistant', text: 'Let\'s refine this KPI. Tell me what you\'d like to change (chart type, labels, SQL, grouping, filters).' }])
+    setAiEditOpen(true)
+  }
+
+  async function sendAiEdit() {
+    if (!aiEditKpi || !aiInput.trim()) return
+    const msg = aiInput.trim()
+    setAiChat(prev => [...prev, { role: 'user', text: msg }])
+    setAiInput('')
+    const history = aiChat.map(m => ({ role: m.role, content: m.text }))
+    const res = await api.editKpiChat(aiEditKpi, msg, history)
+    if (res.reply) setAiChat(prev => [...prev, { role: 'assistant', text: res.reply }])
+    if (res.kpi) {
+      const idx = kpis.findIndex(x => x.id === aiEditKpi.id)
+      if (idx >= 0) {
+        const next = [...kpis]
+        next[idx] = { ...next[idx], ...res.kpi }
+        setKpis(next)
+        setDirty(true)
+        setAiEditKpi(next[idx])
+      }
+    }
+  }
+
   const visibleKpis = kpis.filter(k => (k.tabs && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview'))
   const activeLayout = tabLayouts[activeTab] || layouts
 
@@ -473,16 +505,7 @@ export default function App() {
                   <div className="card-actions no-drag">
                     <button className="btn btn-sm" onClick={() => runKpi(k)}>Test</button>
                     <button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
-                    <button className="btn btn-sm" onClick={async () => {
-                      const instruction = prompt('AI Edit: describe the change')
-                      if (!instruction) return
-                      const updated = await api.editKpi(k, instruction)
-                      const idx = kpis.findIndex(x => x.id === k.id)
-                      if (idx >= 0) {
-                        const next = [...kpis]; next[idx] = { ...next[idx], ...updated }; setKpis(next); setDirty(true)
-                        try { const [ds,tb] = (k.id||'').split(':')[0].split('.'); if (ds&&tb) await api.addToKpiCatalog(ds,tb,[next[idx]]) } catch {}
-                      }
-                    }}>AI Edit</button>
+                    <button className="btn btn-sm" onClick={() => openAiEdit(k)}>AI Edit</button>
                     <button className="btn btn-sm" onClick={async () => {
                       const r = await fetch('/api/export/card', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql: k.sql }) }); const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${k.name||'card'}.csv`; a.click(); URL.revokeObjectURL(url)
                     }}>Export</button>
@@ -495,6 +518,37 @@ export default function App() {
           </GridLayout>
         </div>
       </div>
+      {aiEditOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div style={{ width: 'min(840px, 92vw)', height: 'min(70vh, 85vh)', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderBottom: '1px solid var(--border)' }}>
+              <div className="card-title">AI Edit: {aiEditKpi?.name}</div>
+              <div className="toolbar">
+                <button className="btn btn-sm" onClick={() => setAiEditOpen(false)}>✕</button>
+              </div>
+            </div>
+            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+              <div style={{ borderRight: '1px solid var(--border)', padding: 12, overflow: 'auto' }}>
+                {aiChat.map((m, i) => (
+                  <div key={i} style={{ marginBottom: 12 }}>
+                    <div className="card-subtitle" style={{ marginBottom: 4 }}>{m.role === 'user' ? 'You' : 'Assistant'}</div>
+                    {m.role === 'assistant' ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown> : <div>{m.text}</div>}
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding: 12, overflow: 'auto' }}>
+                <div className="card-subtitle" style={{ marginBottom: 8 }}>Current KPI</div>
+                <pre style={{ whiteSpace: 'pre-wrap' }}><code>{aiEditKpi?.sql}</code></pre>
+                {aiEditKpi?.vega_lite_spec && <div className="card-subtitle" style={{ marginTop: 8 }}>Vega-Lite spec present</div>}
+              </div>
+            </div>
+            <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', gap: 8 }}>
+              <input className="input" placeholder="Describe the change..." value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyDown={e => { if (e.key==='Enter') sendAiEdit() }} style={{ flex: 1 }} />
+              <button className="btn btn-primary" onClick={sendAiEdit}>Send</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

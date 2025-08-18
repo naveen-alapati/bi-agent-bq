@@ -161,48 +161,67 @@ def edit_sql(payload: Dict[str, str]):
 		raise HTTPException(status_code=500, detail=str(exc))
 
 @app.post("/api/kpi/edit")
-def edit_kpi(payload: Dict[str, Any]):
+def edit_kpi(payload: Dict[str, str]):
+	try:
+		original_kpi = payload.get('kpi') or {}
+		original_sql = original_kpi.get('sql') or payload.get('sql', '')
+		instruction = payload.get('instruction', '')
+		# Ask for updated kpi + markdown explanation
+		system = (
+			"You are a KPI editing assistant. Return JSON with two keys: 'kpi' and 'markdown'. "
+			"'kpi' should include updated fields (name, short_description, chart_type, expected_schema, engine, vega_lite_spec, sql, filter_date_column). "
+			"'markdown' is a readable explanation of the change (no JSON)."
+		)
+		user = json.dumps({"kpi": original_kpi, "sql": original_sql, "instruction": instruction})
+		resp = llm_client.generate_json(system, user)
+		updated_kpi = original_kpi.copy()
+		if isinstance(resp, dict):
+			maybe_kpi = resp.get('kpi') or {}
+			if isinstance(maybe_kpi, dict):
+				for key in ["name","short_description","chart_type","expected_schema","engine","vega_lite_spec","sql","filter_date_column"]:
+					if key in maybe_kpi and maybe_kpi[key] is not None:
+						updated_kpi[key] = maybe_kpi[key]
+			markdown = resp.get('markdown') or ''
+		else:
+			markdown = ""
+		# Fallback: if no change produced, try SQL-only edit
+		if updated_kpi.get('sql') == original_sql or not updated_kpi.get('sql'):
+			try:
+				new_sql = kpi_service.llm.edit_sql(original_sql, instruction)
+				if new_sql:
+					updated_kpi['sql'] = new_sql
+			except Exception:
+				pass
+		return {"kpi": updated_kpi, "markdown": markdown or ""}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/kpi/edit_chat")
+def edit_kpi_chat(payload: Dict[str, Any]):
 	"""
-	Payload: { kpi: {id,name,short_description,chart_type,expected_schema,engine,vega_lite_spec,sql,filter_date_column}, instruction: str }
-	Return: updated KPI object
+	Interactive KPI refinement. Body: { kpi, message, history?: [{role, content}], context?: { rows?: any[] } }
+	Returns: { reply: markdown, kpi?: updated }
 	"""
 	try:
 		kpi = payload.get('kpi') or {}
-		instruction = payload.get('instruction') or ''
-		# Try to extract dataset/table for context
-		dataset = None
-		table = None
-		try:
-			# id like "dataset.table:slug"
-			parts = (kpi.get('id') or '').split(':')[0].split('.')
-			if len(parts) >= 2:
-				dataset, table = parts[0], parts[1]
-		except Exception:
-			pass
-		system = (
-			"You are a BI chart and SQL assistant. Output only JSON with the following keys: "
-			"name, short_description, chart_type, expected_schema, engine, vega_lite_spec, sql, filter_date_column. "
-			"Based on the instruction, update chart design (vega-lite spec), labels, and BigQuery SQL so that the SQL returns d3/vega-ready rows. "
-			"Ensure expected_schema matches SQL output (timeseries x,y or categorical label,value or scatter x,y[,label]). "
-			"Use BigQuery Standard SQL and safe NULL handling."
+		message = payload.get('message') or ''
+		history = payload.get('history') or []
+		ctx = payload.get('context') or {}
+		sys = (
+			"You are a KPI editing assistant working with a user to refine one KPI. "
+			"Use the conversation history and the current KPI to suggest improvements. "
+			"When appropriate, propose changes and return JSON with keys 'markdown' (the readable response) and optional 'kpi' (the updated KPI)."
 		)
-		user_obj = {"kpi": kpi, "instruction": instruction}
-		if dataset and table:
-			user_obj["context"] = {"project": PROJECT_ID, "dataset": dataset, "table": table}
-		user = json.dumps(user_obj)
-		resp = llm_client.generate_json(system, user)
-		updated = {
-			"id": kpi.get("id"),
-			"name": resp.get("name", kpi.get("name")),
-			"short_description": resp.get("short_description", kpi.get("short_description")),
-			"chart_type": resp.get("chart_type", kpi.get("chart_type")),
-			"expected_schema": resp.get("expected_schema", kpi.get("expected_schema")),
-			"engine": resp.get("engine", kpi.get("engine")),
-			"vega_lite_spec": resp.get("vega_lite_spec", kpi.get("vega_lite_spec")),
-			"sql": resp.get("sql", kpi.get("sql")),
-			"filter_date_column": resp.get("filter_date_column", kpi.get("filter_date_column")),
-		}
-		return {"kpi": updated}
+		user = json.dumps({"kpi": kpi, "message": message, "history": history[-10:], "context": ctx})
+		resp = llm_client.generate_json(sys, user)
+		markdown = ""
+		updated = None
+		if isinstance(resp, dict):
+			markdown = resp.get('markdown') or resp.get('text') or ""
+			maybe_k = resp.get('kpi')
+			if isinstance(maybe_k, dict):
+				updated = maybe_k
+		return {"reply": markdown or "", "kpi": updated}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
