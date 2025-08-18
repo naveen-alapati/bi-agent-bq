@@ -229,6 +229,54 @@ export default function Home() {
     setChat(prev => [...prev, { role: 'assistant', text: reply }])
   }
 
+  function getPrimaryColor(): string {
+    const c = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim()
+    return c || '#239BA7'
+  }
+
+  function drawBrandHeader(doc: jsPDF, title: string, sub?: string) {
+    const primary = getPrimaryColor()
+    // brand bar
+    doc.setFillColor(primary)
+    doc.rect(0, 0, 210, 12, 'F')
+    // title
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(0, 0, 0)
+    doc.setFontSize(18)
+    doc.text(title, 14, 22)
+    if (sub) {
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(11)
+      doc.text(sub, 14, 30)
+    }
+    doc.setTextColor(0, 0, 0)
+    // divider
+    doc.setDrawColor(220)
+    doc.line(14, 34, 196, 34)
+  }
+
+  function drawFooter(doc: jsPDF, page: number) {
+    const primary = getPrimaryColor()
+    const link = 'https://analytics-kpi-poc-315425729064.asia-south1.run.app'
+    doc.setDrawColor(230)
+    doc.line(14, 285, 196, 285)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    doc.setTextColor(0, 0, 238)
+    doc.textWithLink('Open Dashboard', 14, 292, { url: link })
+    doc.setTextColor(0, 0, 0)
+    doc.text(`Page ${page}`, 196 - 18, 292, { align: 'right' as any })
+  }
+
+  function drawSectionHeader(doc: jsPDF, y: number, text: string) {
+    const primary = getPrimaryColor()
+    doc.setFillColor(primary)
+    doc.rect(14, y - 4, 3, 10, 'F')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(13)
+    doc.text(text, 20, y + 3)
+  }
+
   async function captureChartImage(card: HTMLElement): Promise<HTMLCanvasElement | null> {
     const target = card.querySelector('.no-drag') as HTMLElement
     if (!target) return null
@@ -250,7 +298,7 @@ export default function Home() {
         document.body.appendChild(holder)
         const root = createRoot(holder)
         root.render(React.createElement(ChartRenderer, { chart: kpi, rows }))
-        await new Promise(r => setTimeout(r, 600))
+        await new Promise(r => setTimeout(r, 700))
         const canvas = await html2canvas(holder, { backgroundColor: '#ffffff', scale: 2 })
         try { root.unmount() } catch {}
         try { document.body.removeChild(holder) } catch {}
@@ -261,29 +309,52 @@ export default function Home() {
     })
   }
 
-  function addSummaryPage(doc: jsPDF, title: string, mdText: string) {
+  function addSummaryPage(doc: jsPDF, dashboardName: string | undefined, mdText: string) {
+    drawBrandHeader(doc, 'CXO Summary', new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }))
+    // simple markdown-ish rendering: treat lines starting with '#' as headers, '-' as bullets
+    const lines = (mdText || '').split(/\r?\n/)
+    let y = 46
     const margin = 14
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(18)
-    doc.text('CXO Summary', margin, 20)
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(11)
-    const dateStr = new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-    doc.text(dateStr, margin, 28)
-    doc.setFontSize(12)
-    const lines = doc.splitTextToSize(mdText.replace(/\r\n/g, '\n'), 180)
-    doc.text(lines as any, margin, 40)
-    doc.setDrawColor(230)
-    doc.line(margin, 36, 210 - margin, 36)
-    doc.setTextColor(0,0,238)
-    doc.textWithLink('Open Dashboard', 210 - margin - 42, 28, { url: 'https://analytics-kpi-poc-315425729064.asia-south1.run.app' })
-    doc.setTextColor(0,0,0)
+    for (const raw of lines) {
+      let line = raw.trim()
+      if (!line) { y += 4; continue }
+      if (line.startsWith('###')) {
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(12)
+        doc.text(line.replace(/^###\s*/, ''), margin, y)
+        y += 8
+      } else if (line.startsWith('##')) {
+        drawSectionHeader(doc, y, line.replace(/^##\s*/, ''))
+        y += 12
+      } else if (line.startsWith('#')) {
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(14)
+        doc.text(line.replace(/^#\s*/, ''), margin, y)
+        y += 10
+      } else if (line.match(/^[-*•]\s+/)) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(11)
+        const bullet = '• ' + line.replace(/^[-*•]\s+/, '')
+        const wrapped = (doc as any).splitTextToSize(bullet, 180)
+        doc.text(wrapped, margin, y)
+        y += 6 + (wrapped.length - 1) * 5
+      } else {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(11)
+        const wrapped = (doc as any).splitTextToSize(line, 180)
+        doc.text(wrapped, margin, y)
+        y += 6 + (wrapped.length - 1) * 5
+      }
+      if (y > 260) {
+        const nextPage = ((doc as any).getNumberOfPages?.() || 1) + 1
+        drawFooter(doc, nextPage - 1)
+        doc.addPage(); drawBrandHeader(doc, 'CXO Summary – Continued')
+        y = 46
+      }
+    }
+    drawFooter(doc, (doc as any).getNumberOfPages?.() || 1)
   }
 
   async function exportCurrentDashboardPDF() {
     if (!active) return
     const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
-    // Generate latest summary (current tab only)
+    // Summary page (current tab)
     const context = {
       dashboard_name: active.name,
       active_tab: activeTab,
@@ -291,44 +362,47 @@ export default function Home() {
     }
     const id = convId || await api.cxoStart(active.id, active.name, activeTab)
     const summary = await api.cxoSend(id, 'Generate executive summary from available data.', context)
-    addSummaryPage(doc, 'CXO Summary', summary)
-    // Charts: 2 per page vertically on subsequent pages
+    addSummaryPage(doc, active.name, summary)
+
+    // Charts pages (2 per page vertically) with captions
     const cards = Array.from(document.querySelectorAll('.layout .card')) as HTMLElement[]
     const visible = (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview'))
-    let placed = 0
-    let slotIndex = 0
+    const imgs: { title: string; dataUrl: string; }[] = []
     for (const k of visible) {
       const card = cards.find(c => (c.getAttribute('data-grid') || '').includes(`\"i\":\"${k.id}\"`)) || cards.find(c => c.innerText.includes(k.name))
       if (!card) continue
       const canvas = await captureChartImage(card)
       if (!canvas) continue
-      if (placed === 0) { /* summary is first page, start new page for charts */ doc.addPage() }
-      const imgW = 180, imgH = (canvas.height / canvas.width) * imgW
-      const ySlots = [20, 150]
-      const which = slotIndex % 2
-      doc.addImage(canvas.toDataURL('image/png'), 'PNG', 15, ySlots[which], imgW, Math.min(imgH, 120))
-      slotIndex++
-      if (slotIndex % 2 === 0) doc.addPage()
-      placed++
+      imgs.push({ title: k.name, dataUrl: canvas.toDataURL('image/png') })
     }
-    // remove trailing empty page if last addPage() created an extra
-    const totalPages = (doc as any).getNumberOfPages?.() || 0
-    if (totalPages > 0) {
-      // If the last page has no images (slotIndex was even and we added a new page), remove it
-      if (slotIndex % 2 === 0) {
-        (doc as any).deletePage(totalPages)
+    if (imgs.length) {
+      doc.addPage(); drawBrandHeader(doc, 'Charts')
+      let slot = 0
+      for (let i = 0; i < imgs.length; i++) {
+        const { title, dataUrl } = imgs[i]
+        const ySlots = [46, 165]
+        const y = ySlots[slot % 2]
+        const imgW = 180
+        const imgH = 100
+        doc.addImage(dataUrl, 'PNG', 15, y, imgW, imgH)
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(10)
+        doc.text(title, 15, y + imgH + 6)
+        if (slot % 2 === 1 && i < imgs.length - 1) { drawFooter(doc, (doc as any).getNumberOfPages?.() || 1); doc.addPage(); drawBrandHeader(doc, 'Charts') }
+        slot++
       }
+      drawFooter(doc, (doc as any).getNumberOfPages?.() || 1)
     }
+    // finalize
     doc.save(`${active.name || 'dashboard'}-cxo-summary.pdf`)
   }
 
   async function exportAllDashboardsPDF() {
     const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
-    let started = false
+    let firstSection = true
     for (const d of dashboards) {
       const full = await api.getDashboard(d.id)
       const activeTabId = (full.last_active_tab || 'overview')
-      // latest summary for dashboard
+      // latest summary
       const context = {
         dashboard_name: full.name,
         active_tab: activeTabId,
@@ -336,34 +410,36 @@ export default function Home() {
       }
       const cid = await api.cxoStart(full.id, full.name, activeTabId)
       const summary = await api.cxoSend(cid, 'Generate executive summary from available data.', context)
-      if (started) doc.addPage()
-      addSummaryPage(doc, 'CXO Summary', `# ${full.name}\n\n${summary}`)
-      started = true
-      // render charts offscreen (current tab only, as per requirement)
+      if (!firstSection) doc.addPage()
+      addSummaryPage(doc, full.name, `# ${full.name}\n\n${summary}`)
+
+      // charts offscreen (current tab)
       const visible = (full.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTabId) : activeTabId === 'overview'))
-      let slotIndex = 0
+      const imgs: { title: string; dataUrl: string; }[] = []
       for (const k of visible) {
         const rows = await api.runKpi(k.sql, undefined, k.filter_date_column, k.expected_schema)
         const canvas = await renderKpiOffscreen(k, rows)
         if (!canvas) continue
-        doc.addPage()
-        const imgW = 180, imgH = (canvas.height / canvas.width) * imgW
-        const ySlots = [20, 150]
-        doc.addImage(canvas.toDataURL('image/png'), 'PNG', 15, ySlots[0], imgW, Math.min(imgH, 120))
-        // place second slot if next exists
-        const idx = visible.indexOf(k)
-        if (visible[idx + 1]) {
-          const k2 = visible[idx + 1]
-          const rows2 = await api.runKpi(k2.sql, undefined, k2.filter_date_column, k2.expected_schema)
-          const canvas2 = await renderKpiOffscreen(k2, rows2)
-          if (canvas2) {
-            doc.addPage()
-            const imgH2 = (canvas2.height / canvas2.width) * imgW
-            doc.addImage(canvas2.toDataURL('image/png'), 'PNG', 15, ySlots[0], imgW, Math.min(imgH2, 120))
-          }
-        }
-        slotIndex += 2
+        imgs.push({ title: k.name, dataUrl: canvas.toDataURL('image/png') })
       }
+      if (imgs.length) {
+        doc.addPage(); drawBrandHeader(doc, `${full.name} – Charts`)
+        let slot = 0
+        for (let i = 0; i < imgs.length; i++) {
+          const { title, dataUrl } = imgs[i]
+          const ySlots = [46, 165]
+          const y = ySlots[slot % 2]
+          const imgW = 180
+          const imgH = 100
+          doc.addImage(dataUrl, 'PNG', 15, y, imgW, imgH)
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(10)
+          doc.text(title, 15, y + imgH + 6)
+          if (slot % 2 === 1 && i < imgs.length - 1) { drawFooter(doc, (doc as any).getNumberOfPages?.() || 1); doc.addPage(); drawBrandHeader(doc, `${full.name} – Charts`) }
+          slot++
+        }
+        drawFooter(doc, (doc as any).getNumberOfPages?.() || 1)
+      }
+      firstSection = false
     }
     doc.save(`all-dashboards-cxo-summary.pdf`)
   }
