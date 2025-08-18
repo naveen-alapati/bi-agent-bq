@@ -21,7 +21,7 @@ export function ChartRenderer({ chart, rows, onSelect }: { chart: any, rows: any
   }, [])
 
   // Simple card renderer for single metric KPIs
-  if ((chart.chart_type === 'card') || (chart.expected_schema && /card|single/i.test(chart.expected_schema))) {
+  if ((chart?.chart_type === 'card') || (chart?.expected_schema && /card|single/i.test(chart.expected_schema))) {
     const fmt = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 })
     const arr = Array.isArray(rows) ? rows : []
     let value: number | string | null = null
@@ -57,7 +57,7 @@ export function ChartRenderer({ chart, rows, onSelect }: { chart: any, rows: any
   }
 
   useEffect(() => {
-    if (!(chart.engine === 'vega-lite' && chart.vega_lite_spec && vegaRef.current)) return
+    if (!(chart && chart.engine === 'vega-lite' && chart.vega_lite_spec && vegaRef.current)) return
     if (size.w <= 0 || size.h <= 0) return
     let result: Result | null = null
     try {
@@ -88,7 +88,7 @@ export function ChartRenderer({ chart, rows, onSelect }: { chart: any, rows: any
     }
   }, [chart, rows, size])
 
-  if (chart.engine === 'vega-lite' && chart.vega_lite_spec) {
+  if (chart && chart.engine === 'vega-lite' && chart.vega_lite_spec) {
     return <div ref={wrapRef} className="no-drag" style={{ width: '100%', height: '100%', minHeight: 200 }}>
       <div ref={vegaRef} style={{ width: '100%', height: '100%' }} />
     </div>
