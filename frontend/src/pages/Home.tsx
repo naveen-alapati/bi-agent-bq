@@ -102,6 +102,26 @@ export default function Home() {
       setChat([{ role: 'assistant', text: welcome }])
     }
     setCxoOpen(true); setCxoMin(false)
+    // trigger feed animation briefly
+    setShowFeed(true)
+    setTimeout(() => setShowFeed(false), 1200)
+  }
+
+  const [showFeed, setShowFeed] = useState(false)
+
+  async function quickSummary() {
+    if (!active) return
+    const context = {
+      dashboard_name: active.name,
+      active_tab: activeTab,
+      kpis: (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview')).map((k:any) => ({ id: k.id, name: k.name, rows: rowsByKpi[k.id] || [] }))
+    }
+    const id = convId || await api.cxoStart(active.id, active.name, activeTab)
+    if (!convId) setConvId(id)
+    const msg = 'Generate executive summary from available data.'
+    setChat(prev => [...prev, { role: 'user', text: msg }])
+    const reply = await api.cxoSend(id, msg, context)
+    setChat(prev => [...prev, { role: 'assistant', text: reply }])
   }
 
   async function sendCxo() {
@@ -164,13 +184,22 @@ export default function Home() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 10, borderBottom: '1px solid var(--border)', cursor: 'move' }} onMouseDown={onDragChat}>
             <div className="card-title">CXO AI Assist</div>
             <div className="toolbar">
+              <button className="btn btn-sm" onClick={quickSummary}>Generate CXO Summary</button>
               <button className="btn btn-sm" onClick={() => setCxoMin(m => !m)}>{cxoMin ? '▣' : '–'}</button>
               <button className="btn btn-sm" onClick={() => setCxoOpen(false)}>✕</button>
             </div>
           </div>
           {!cxoMin && (
             <>
-              <div style={{ flex: 1, overflow: 'auto', padding: 12 }}>
+              <div style={{ position: 'relative', flex: 1, overflow: 'auto', padding: 12 }}>
+                {showFeed && (
+                  <div className="feed-anim">
+                    <div className="feed-dot" style={{ position: 'absolute', left: 24, bottom: 24 }} />
+                    <div className="feed-line" style={{ position: 'absolute', left: 68, bottom: 46 }} />
+                    <div className="feed-dot alt" style={{ position: 'absolute', left: 112, bottom: 30 }} />
+                    <div className="feed-line" style={{ position: 'absolute', left: 150, bottom: 60 }} />
+                  </div>
+                )}
                 {chat.map((m, i) => (
                   <div key={i} style={{ marginBottom: 12, textAlign: m.role==='user' ? 'right':'left' }}>
                     <div style={{ display: 'inline-block', padding: '12px 14px', borderRadius: 12, background: m.role==='user' ? 'var(--primary)' : 'var(--surface)', color: m.role==='user' ? '#fff' : 'var(--fg)', maxWidth: 680, textAlign: 'left' }}>

@@ -165,3 +165,10 @@ body {
 .tab-pill.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 .tab-arrow { display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; font-size: 16px; color: var(--fg); border: 1px solid var(--border); border-radius: 8px; background: var(--card); cursor: pointer; user-select: none; }
 .tab-arrow:hover { filter: brightness(0.98); }
+
+/* CXO feed animation */
+.feed-anim { position: absolute; inset: 48px 8px 56px 8px; pointer-events: none; overflow: hidden; }
+.feed-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--primary); opacity: 0; animation: feedFlow 1.2s ease-in forwards; }
+.feed-dot.alt { background: var(--accent); }
+.feed-line { width: 24px; height: 6px; border-radius: 4px; background: var(--warn); opacity: 0; animation: feedFlow 1.2s ease-in forwards; }
+@keyframes feedFlow { 0% { transform: translateX(-40px) translateY(20px); opacity: 0; } 30% { opacity: 0.8; } 100% { transform: translateX(480px) translateY(-20px); opacity: 0; } }
