@@ -33,6 +33,7 @@ export default function Home() {
   const chatWrapRef = useRef<HTMLDivElement | null>(null)
   const [chatPos, setChatPos] = useState<{ x: number; y: number }>({ x: 16, y: 16 })
   const [chatSize, setChatSize] = useState<{ w: number; h: number }>({ w: 520, h: 0 })
+  const feedLayerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => { api.listDashboards().then((rows) => {
     // dedupe by name, keep latest updated_at
@@ -102,9 +103,7 @@ export default function Home() {
       setChat([{ role: 'assistant', text: welcome }])
     }
     setCxoOpen(true); setCxoMin(false)
-    // trigger feed animation briefly
-    setShowFeed(true)
-    setTimeout(() => setShowFeed(false), 1200)
+    setTimeout(() => animateFeedFromCharts(), 120)
   }
 
   const [showFeed, setShowFeed] = useState(false)
@@ -160,6 +159,46 @@ export default function Home() {
     window.addEventListener('mouseup', up)
   }
 
+  function animateFeedFromCharts() {
+    try {
+      const overlay = feedLayerRef.current
+      const chatEl = chatWrapRef.current
+      if (!overlay || !chatEl) return
+      const chatRect = chatEl.getBoundingClientRect()
+      const destX = chatRect.left + chatRect.width - 60
+      const destY = chatRect.top + 40
+      const cards = Array.from(document.querySelectorAll('.layout .card')) as HTMLElement[]
+      const take = cards.slice(0, 8)
+      take.forEach((card, idx) => {
+        const r = card.getBoundingClientRect()
+        const sx = r.left + r.width / 2
+        const sy = r.top + r.height / 2
+        const dot = document.createElement('div')
+        dot.style.position = 'fixed'
+        dot.style.left = `${sx}px`
+        dot.style.top = `${sy}px`
+        dot.style.width = '10px'
+        dot.style.height = '10px'
+        dot.style.borderRadius = '50%'
+        dot.style.background = idx % 2 === 0 ? 'var(--primary)' : 'var(--accent)'
+        dot.style.boxShadow = '0 0 12px rgba(0,0,0,0.15)'
+        dot.style.transition = 'transform 750ms cubic-bezier(0.22, 1, 0.36, 1), opacity 900ms ease'
+        dot.style.opacity = '0.9'
+        overlay.appendChild(dot)
+        // trigger
+        const dx = destX - sx
+        const dy = destY - sy
+        setTimeout(() => {
+          dot.style.transform = `translate(${dx}px, ${dy}px)`
+          dot.style.opacity = '0'
+        }, 10 + idx * 60)
+        setTimeout(() => {
+          try { overlay.removeChild(dot) } catch {}
+        }, 1100 + idx * 60)
+      })
+    } catch {}
+  }
+
   return (
     <div>
       <div className="toast-container">
@@ -192,14 +231,7 @@ export default function Home() {
           {!cxoMin && (
             <>
               <div style={{ position: 'relative', flex: 1, overflow: 'auto', padding: 12 }}>
-                {showFeed && (
-                  <div className="feed-anim">
-                    <div className="feed-dot" style={{ position: 'absolute', left: 24, bottom: 24 }} />
-                    <div className="feed-line" style={{ position: 'absolute', left: 68, bottom: 46 }} />
-                    <div className="feed-dot alt" style={{ position: 'absolute', left: 112, bottom: 30 }} />
-                    <div className="feed-line" style={{ position: 'absolute', left: 150, bottom: 60 }} />
-                  </div>
-                )}
+                <div ref={feedLayerRef} style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 9997 }} />
                 {chat.map((m, i) => (
                   <div key={i} style={{ marginBottom: 12, textAlign: m.role==='user' ? 'right':'left' }}>
                     <div style={{ display: 'inline-block', padding: '12px 14px', borderRadius: 12, background: m.role==='user' ? 'var(--primary)' : 'var(--surface)', color: m.role==='user' ? '#fff' : 'var(--fg)', maxWidth: 680, textAlign: 'left' }}>
