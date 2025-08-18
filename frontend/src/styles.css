@@ -160,7 +160,7 @@ body {
 
 /* Big Tabs */
 .tabs-bar { display: flex; align-items: center; gap: 0; }
-.tabs-scroll { display: flex; align-items: center; gap: 0; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; flex: 1; }
+.tabs-scroll { display: flex; align-items: center; gap: 0; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; flex: 1; flex-wrap: nowrap; }
 .tabs-scroll::-webkit-scrollbar { display: none; }
 .tab-pill { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; letter-spacing: .6px; padding: 16px 36px; font-size: 18px; line-height: 1.6; border-radius: 6px; border: 2px solid var(--border); background: var(--surface); color: var(--fg); cursor: pointer; user-select: none; transition: background .15s ease, box-shadow .15s ease, transform .1s ease; }
 .tab-pill + .tab-pill { margin-left: -2px; } /* collapse adjacent borders */

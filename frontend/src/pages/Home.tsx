@@ -584,9 +584,13 @@ export default function Home() {
               </div>
 
               <div className="toolbar" style={{ gap: 6 }}>
-                {tabs.sort((a,b)=>a.order-b.order).map(t => (
-                  <button key={t.id} className="btn btn-sm" style={{ background: t.id===activeTab? 'var(--primary)':'', color: t.id===activeTab? '#fff': undefined, borderColor: t.id===activeTab? 'var(--primary)':'' }} onClick={() => setActiveTab(t.id)}>{t.name}</button>
-                ))}
+                <div className="tabs-bar" style={{ width: '100%' }}>
+                  <div id="tabs-scroll" className="tabs-scroll">
+                    {tabs.sort((a,b)=>a.order-b.order).map((t, idx) => (
+                      <div key={t.id} className={`tab-pill ${t.id===activeTab?'active':''}`} onClick={() => setActiveTab(t.id)}>{t.name}</div>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <GridLayout className="layout" layout={layout} cols={12} rowHeight={30} width={gridW} isResizable={false} isDraggable={false}>
