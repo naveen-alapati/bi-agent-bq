@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import html2canvas from 'html2canvas'
 
 export default function Home() {
   const [dashboards, setDashboards] = useState<any[]>([])
@@ -94,6 +95,94 @@ export default function Home() {
     toast('success', 'Dashboard refreshed')
   }
 
+  function animateBezier(node: HTMLElement, sx: number, sy: number, dx: number, dy: number, durationMs: number, delayMs: number, curveOffset = 120) {
+    const cx = (sx + dx) / 2 + (Math.random() * 2 - 1) * curveOffset
+    const cy = (sy + dy) / 2 - (Math.random() * 2 - 1) * (curveOffset * 0.6)
+    const start = performance.now() + delayMs
+    function step(now: number) {
+      if (now < start) { requestAnimationFrame(step); return }
+      const t = Math.min(1, (now - start) / durationMs)
+      const omt = 1 - t
+      const x = omt * omt * sx + 2 * omt * t * cx + t * t * dx
+      const y = omt * omt * sy + 2 * omt * t * cy + t * t * dy
+      const scale = 0.95 - 0.35 * t
+      const rot = (t * 20) * (Math.random() > 0.5 ? 1 : -1)
+      node.style.transform = `translate(${x - sx}px, ${y - sy}px) scale(${scale}) rotate(${rot}deg)`
+      node.style.opacity = `${1 - t}`
+      if (t < 1) requestAnimationFrame(step)
+      else try { node.remove() } catch {}
+    }
+    requestAnimationFrame(step)
+  }
+
+  // Snapshot and animate mini charts into chat with curved paths and icon overlays
+  async function animateMiniCharts() {
+    try {
+      const overlay = feedLayerRef.current
+      const chatEl = chatWrapRef.current
+      if (!overlay || !chatEl) return
+      const chatRect = chatEl.getBoundingClientRect()
+      const destX = chatRect.left + chatRect.width - 80
+      const destY = chatRect.top + 60
+      const cards = Array.from(document.querySelectorAll('.layout .card')) as HTMLElement[]
+      const take = cards.slice(0, 6)
+      for (let idx = 0; idx < take.length; idx++) {
+        const card = take[idx]
+        const r = card.getBoundingClientRect()
+        const sx = r.left + 12
+        const sy = r.top + 12
+        const target = card.querySelector('.no-drag') as HTMLElement
+        if (!target) continue
+        const canvas = await html2canvas(target, { backgroundColor: null, scale: 0.28 })
+        const wrap = document.createElement('div')
+        wrap.style.position = 'fixed'
+        wrap.style.left = `${sx}px`
+        wrap.style.top = `${sy}px`
+        wrap.style.willChange = 'transform, opacity'
+        wrap.style.opacity = '0.98'
+        const img = document.createElement('img')
+        img.src = canvas.toDataURL('image/png')
+        img.style.width = `${Math.max(140, Math.min(220, r.width * 0.32))}px`
+        img.style.height = 'auto'
+        img.style.borderRadius = '10px'
+        img.style.boxShadow = '0 10px 28px rgba(0,0,0,0.22)'
+        // icon overlay
+        const icon = document.createElement('div')
+        icon.textContent = '📊'
+        icon.style.position = 'absolute'
+        icon.style.right = '-8px'
+        icon.style.top = '-8px'
+        icon.style.width = '24px'
+        icon.style.height = '24px'
+        icon.style.borderRadius = '50%'
+        icon.style.display = 'flex'
+        icon.style.alignItems = 'center'
+        icon.style.justifyContent = 'center'
+        icon.style.background = 'var(--primary)'
+        icon.style.color = '#fff'
+        icon.style.fontSize = '14px'
+        icon.style.boxShadow = '0 2px 8px rgba(0,0,0,0.18)'
+        wrap.appendChild(img)
+        wrap.appendChild(icon)
+        overlay.appendChild(wrap)
+        // animate along bezier
+        const delay = 80 + idx * 160
+        animateBezier(wrap, sx, sy, destX, destY, 1200, delay, 120 + Math.random() * 80)
+      }
+    } catch {}
+  }
+
+  function onDragChat(e: React.MouseEvent) {
+    const startX = e.clientX, startY = e.clientY
+    const origin = { ...chatPos }
+    function move(ev: MouseEvent) {
+      setChatPos({ x: Math.max(8, origin.x + (ev.clientX - startX)), y: Math.max(8, origin.y + (ev.clientY - startY)) })
+    }
+    function up() { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
   async function openCxo() {
     if (!active) return
     if (!convId) {
@@ -103,7 +192,7 @@ export default function Home() {
       setChat([{ role: 'assistant', text: welcome }])
     }
     setCxoOpen(true); setCxoMin(false)
-    setTimeout(() => animateFeedFromCharts(), 120)
+    setTimeout(() => animateMiniCharts(), 220)
   }
 
   const [showFeed, setShowFeed] = useState(false)
@@ -147,57 +236,6 @@ export default function Home() {
     if (!active) return []
     return (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview'))
   }, [active, activeTab])
-
-  function onDragChat(e: React.MouseEvent) {
-    const startX = e.clientX, startY = e.clientY
-    const origin = { ...chatPos }
-    function move(ev: MouseEvent) {
-      setChatPos({ x: Math.max(8, origin.x + (ev.clientX - startX)), y: Math.max(8, origin.y + (ev.clientY - startY)) })
-    }
-    function up() { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
-  }
-
-  function animateFeedFromCharts() {
-    try {
-      const overlay = feedLayerRef.current
-      const chatEl = chatWrapRef.current
-      if (!overlay || !chatEl) return
-      const chatRect = chatEl.getBoundingClientRect()
-      const destX = chatRect.left + chatRect.width - 60
-      const destY = chatRect.top + 40
-      const cards = Array.from(document.querySelectorAll('.layout .card')) as HTMLElement[]
-      const take = cards.slice(0, 8)
-      take.forEach((card, idx) => {
-        const r = card.getBoundingClientRect()
-        const sx = r.left + r.width / 2
-        const sy = r.top + r.height / 2
-        const dot = document.createElement('div')
-        dot.style.position = 'fixed'
-        dot.style.left = `${sx}px`
-        dot.style.top = `${sy}px`
-        dot.style.width = '10px'
-        dot.style.height = '10px'
-        dot.style.borderRadius = '50%'
-        dot.style.background = idx % 2 === 0 ? 'var(--primary)' : 'var(--accent)'
-        dot.style.boxShadow = '0 0 12px rgba(0,0,0,0.15)'
-        dot.style.transition = 'transform 750ms cubic-bezier(0.22, 1, 0.36, 1), opacity 900ms ease'
-        dot.style.opacity = '0.9'
-        overlay.appendChild(dot)
-        // trigger
-        const dx = destX - sx
-        const dy = destY - sy
-        setTimeout(() => {
-          dot.style.transform = `translate(${dx}px, ${dy}px)`
-          dot.style.opacity = '0'
-        }, 10 + idx * 60)
-        setTimeout(() => {
-          try { overlay.removeChild(dot) } catch {}
-        }, 1100 + idx * 60)
-      })
-    } catch {}
-  }
 
   return (
     <div>
