@@ -56,7 +56,7 @@ export default function Home() {
   }
 
   useEffect(() => { api.listDashboards().then((rows) => {
-    // dedupe by name, keep latest updated_at
+    // dedupe by name, keep latest updated_at, but preserve default flag if known
     const byName: Record<string, any> = {}
     for (const d of rows || []) {
       const key = d.name
@@ -73,7 +73,9 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       const def = await api.getDefaultDashboard().catch(() => null)
-      if (def) loadDashboard(def)
+      if (def) {
+        await loadDashboard(def)
+      }
     })()
   }, [])
 

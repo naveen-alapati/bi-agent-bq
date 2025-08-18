@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { TableSelector } from '../ui/TableSelector'
 import { KPIList } from '../ui/KPIList'
 import { ChartRenderer } from '../ui/ChartRenderer'
@@ -17,6 +17,7 @@ import Cookies from 'js-cookie'
 
 export default function App() {
   const params = useParams()
+  const navigate = useNavigate()
   const [search] = useSearchParams()
   const routeId = params.id || search.get('dashboardId') || ''
   const [datasets, setDatasets] = useState<any[]>([])
@@ -134,6 +135,7 @@ export default function App() {
       await api.prepare(selected, 5)
       const kpisResp = await api.generateKpis(selected, 5)
       setKpis(kpisResp)
+      setDirty(true)
       for (const sel of selected) {
         const perTable = kpisResp.filter(k => (k.id || '').startsWith(`${sel.datasetId}.${sel.tableId}:`))
         if (perTable.length) {
@@ -169,7 +171,7 @@ export default function App() {
     setSaving(true)
     try {
       const payload = {
-        id: asNew ? undefined : undefined,
+        id: asNew ? undefined : (routeId || undefined),
         name: dashboardName,
         version: asNew ? '1.0.0' : undefined,
         kpis,
@@ -187,6 +189,10 @@ export default function App() {
       await api.listDashboards().then(setDashList)
       toast('success', `Saved ${res.name} v${res.version}`)
       setDirty(false)
+      // If this was a Save As, navigate to the new dashboard id so future saves update the same record
+      if (asNew && res.id && res.id !== routeId) {
+        navigate(`/editor/${res.id}`)
+      }
     } catch (e: any) {
       toast('error', e?.message || 'Failed to save')
     } finally {
@@ -249,6 +255,7 @@ export default function App() {
     const copy = { ...tabLayouts }
     delete copy[id]
     setTabLayouts(copy)
+    setDirty(true)
   }
 
   function toggleKpiTab(k: any, tabId: string) {
@@ -261,6 +268,7 @@ export default function App() {
     const next = [...kpis]
     next[idx] = { ...current, tabs: Array.from(set) }
     setKpis(next)
+    setDirty(true)
   }
 
   function startEditTab(t: {id: string; name: string}) {
@@ -274,6 +282,7 @@ export default function App() {
     setTabs(prev => prev.map(tab => tab.id === editingTabId ? { ...tab, name } : tab))
     setEditingTabId(null)
     setEditingTabName('')
+    setDirty(true)
   }
 
   function cancelEditTab() {
