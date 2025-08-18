@@ -9,6 +9,10 @@ from decimal import Decimal
 import uuid
 import re as _re
 
+APP_DATASET_LABEL_KEY = "app"
+APP_DATASET_LABEL_VAL = "analytics-kpi-poc"
+APP_DATASET_NAMES = {"analytics_dash", "analytics_poc", "analytics_cxo"}
+
 
 class BigQueryService:
     def __init__(self, project_id: Optional[str], location: str = "US") -> None:
@@ -59,15 +63,32 @@ class BigQueryService:
         return v
 
     def list_datasets(self) -> List[Dict[str, Any]]:
-        datasets = []
+        datasets: List[Dict[str, Any]] = []
+        # First pass: list ids
+        ids = []
         for ds in self.client.list_datasets(project=self.project_id):
-            datasets.append(
-                {
-                    "datasetId": ds.dataset_id,
-                    "friendlyName": None,
-                    "description": None,
-                }
-            )
+            ids.append(ds.dataset_id)
+        # Filter out app-created datasets by label or known names
+        for ds_id in ids:
+            # quick exclusion by name
+            if ds_id in APP_DATASET_NAMES:
+                continue
+            exclude = False
+            # try to inspect labels; if permission fails, ignore and keep
+            try:
+                meta = self.client.get_dataset(f"{self.project_id}.{ds_id}")
+                labels = getattr(meta, "labels", {}) or {}
+                if labels.get(APP_DATASET_LABEL_KEY) == APP_DATASET_LABEL_VAL:
+                    exclude = True
+            except Exception:
+                exclude = False
+            if exclude:
+                continue
+            datasets.append({
+                "datasetId": ds_id,
+                "friendlyName": None,
+                "description": None,
+            })
         return datasets
 
     def list_tables(self, dataset_id: str) -> List[Dict[str, Any]]:
@@ -120,9 +141,21 @@ class BigQueryService:
     def ensure_dataset(self, dataset_id: str) -> None:
         ds_ref = bigquery.Dataset(f"{self.project_id}.{dataset_id}")
         try:
-            self.client.get_dataset(ds_ref)
+            ds = self.client.get_dataset(ds_ref)
+            # ensure label is present
+            labels = dict(ds.labels or {})
+            if labels.get(APP_DATASET_LABEL_KEY) != APP_DATASET_LABEL_VAL and dataset_id in APP_DATASET_NAMES:
+                labels[APP_DATASET_LABEL_KEY] = APP_DATASET_LABEL_VAL
+                ds.labels = labels
+                try:
+                    self.client.update_dataset(ds, ["labels"])  # type: ignore[arg-type]
+                except Exception:
+                    pass
         except NotFound:
             ds_ref.location = self.location
+            # tag app-created datasets
+            if dataset_id in APP_DATASET_NAMES or True:
+                ds_ref.labels = {APP_DATASET_LABEL_KEY: APP_DATASET_LABEL_VAL}
             self.client.create_dataset(ds_ref)
 
     def ensure_embeddings_table(self, dataset_id: str, table_name: str = "table_embeddings") -> str:
