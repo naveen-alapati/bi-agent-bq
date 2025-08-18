@@ -430,8 +430,12 @@ def cxo_send(payload: Dict[str, Any]):
 		)
 		user_obj = {
 			"instruction": (
-				"When asked for a summary, structure with these sections when supported by data and otherwise omit: "
-				"Executive Overview, Financial Health, Customer & Market, Operational Efficiency."
+				"Create a CXO-ready Markdown summary focused on THREE sections (omit any without sufficient data):\n\n"
+				"1. Executive Calls to Action — 3 bullets max; each bullet should include owner, due date, and measurable outcome.\n"
+				"2. Financial Bridge and Sensitivities — a short 'what moved the number' bridge note and 1–2 bullets on the most material sensitivities (e.g., conversion, price, mix).\n"
+				"3. Risk and Compliance Watchlist — 2–3 bullets on the most urgent risks (operational, data/fraud, regulatory) with mitigation steps.\n\n"
+				"Rules: Avoid repetition; keep to 3–5 bullets per section; be precise and action-oriented.\n"
+				"End with a brief call-to-action line inviting the CXO to interact with CXO AI Assist for deeper insights and a next-step action plan, and include the dashboard link: https://analytics-kpi-poc-315425729064.asia-south1.run.app"
 			),
 			"dashboard": dashboard_name,
 			"active_tab": active_tab,
