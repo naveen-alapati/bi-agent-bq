@@ -33,6 +33,7 @@ export default function Home() {
   const [convId, setConvId] = useState<string>('')
   const [chat, setChat] = useState<{ role: 'assistant'|'user'; text: string }[]>([])
   const [input, setInput] = useState('')
+  const [cxoTyping, setCxoTyping] = useState(false)
   const chatWrapRef = useRef<HTMLDivElement | null>(null)
   const [chatPos, setChatPos] = useState<{ x: number; y: number }>({ x: 16, y: 16 })
   const [chatSize, setChatSize] = useState<{ w: number; h: number }>({ w: 520, h: 0 })
@@ -220,6 +221,7 @@ export default function Home() {
     const msg = input.trim()
     setChat(prev => [...prev, { role: 'user', text: msg }])
     setInput('')
+    setCxoTyping(true)
     const context = {
       dashboard_name: active.name,
       active_tab: activeTab,
@@ -227,6 +229,7 @@ export default function Home() {
     }
     const reply = await api.cxoSend(convId, msg, context)
     setChat(prev => [...prev, { role: 'assistant', text: reply }])
+    setCxoTyping(false)
   }
 
   function getPrimaryColor(): string {
@@ -519,6 +522,11 @@ export default function Home() {
                     </div>
                   </div>
                 ))}
+                {cxoTyping && (
+                  <div style={{ marginBottom: 12, textAlign: 'left' }}>
+                    <div className="typing"><span className="dot"></span><span className="dot"></span><span className="dot"></span></div>
+                  </div>
+                )}
               </div>
               <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', gap: 8 }}>
                 <input className="input" placeholder="Ask anything..." value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key==='Enter') sendCxo() }} style={{ flex: 1 }} />

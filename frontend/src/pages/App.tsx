@@ -53,6 +53,7 @@ export default function App() {
   const [aiEditKpi, setAiEditKpi] = useState<any>(null)
   const [aiChat, setAiChat] = useState<{ role: 'assistant'|'user'; text: string }[]>([])
   const [aiInput, setAiInput] = useState('')
+  const [aiTyping, setAiTyping] = useState(false)
 
   function applyPalette(p: { primary: string; accent: string; surface: string; warn: string }) {
     const r = document.documentElement
@@ -291,6 +292,7 @@ export default function App() {
     setAiChat(prev => [...prev, { role: 'user', text: msg }])
     setAiInput('')
     const history = aiChat.map(m => ({ role: m.role, content: m.text }))
+    setAiTyping(true)
     const res = await api.editKpiChat(aiEditKpi, msg, history)
     if (res.reply) setAiChat(prev => [...prev, { role: 'assistant', text: res.reply }])
     if (res.kpi) {
@@ -303,6 +305,7 @@ export default function App() {
         setAiEditKpi(next[idx])
       }
     }
+    setAiTyping(false)
   }
 
   const visibleKpis = kpis.filter(k => (k.tabs && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview'))
@@ -535,6 +538,11 @@ export default function App() {
                     {m.role === 'assistant' ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown> : <div>{m.text}</div>}
                   </div>
                 ))}
+                {aiTyping && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div className="typing"><span className="dot"></span><span className="dot"></span><span className="dot"></span></div>
+                  </div>
+                )}
               </div>
               <div style={{ padding: 12, overflow: 'auto' }}>
                 <div className="card-subtitle" style={{ marginBottom: 8 }}>Current KPI</div>
