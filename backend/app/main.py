@@ -382,44 +382,46 @@ def cxo_send(payload: Dict[str, Any]):
 		except Exception:
 			user_emb = []
 		bq_service.add_cxo_message(conversation_id, role="user", content=message, embedding=user_emb)
+		# recent history (last 30 days)
+		history = bq_service.list_cxo_messages(conversation_id, days=30)
 		# build prompt from context (KPIs data summaries) and user message
 		kpis = context.get('kpis') or []
 		active_tab = context.get('active_tab') or 'overview'
 		dashboard_name = context.get('dashboard_name') or ''
-		# Optionally skip if no data rows
+		# Aggregate KPI data (capped)
 		kpis_with_data = []
 		for k in kpis:
 			rows = k.get('rows') or []
 			if rows:
-				# cap to 100 rows per KPI
 				kpis_with_data.append({"id": k.get('id'), "name": k.get('name'), "rows": rows[:100]})
 		if not kpis_with_data:
 			resp_md = "No data is available for the current tab. Run or refresh KPIs to generate a summary."
 			bq_service.add_cxo_message(conversation_id, role="assistant", content=resp_md, embedding=[])
 			return {"reply": resp_md}
+		# System and user directives
 		sys = (
-			"You are CXO AI Assist for a CEO named Naveen Alapati. "
-			"Act as an all-round strategist. Be concise, executive, and action-oriented. "
-			"ONLY use the provided KPI data rows. If a section has no relevant data, omit it. "
+			"You are CXO AI Assist for a CEO named Naveen Alapati. Professional strategist tone. "
+			"Use only the provided KPI data rows and recent chat history (last 30 days). Be interactive: "
+			"- If user asks broadly (e.g., 'areas that need attention'), list top 2–3 options and ask which one to drill into. "
+			"- If user says 'Pick one', choose the highest urgency/risk item. "
+			"- Avoid repeating prior summaries; add incremental insights. "
+			"- Provide 3–5 bullets max and propose next steps (owner, timeline). "
+			"- If data is insufficient, ask a clarifying question before answering. "
 			"Output strictly Markdown (no JSON)."
 		)
 		user_obj = {
 			"instruction": (
-				"Create an executive summary using Markdown with these sections when supported by data: "
-				"1. Executive Overview (top KPIs, short narrative). "
-				"2. Financial Health Snapshot (revenue growth, margins, cost-to-serve). "
-				"3. Customer & Market Pulse (NPS/CSAT, acquisition vs churn). "
-				"4. Operational Efficiency Highlights (productivity, utilization, bottlenecks). "
-				"Skip sections with no data."
+				"When asked for a summary, structure with these sections when supported by data and otherwise omit: "
+				"Executive Overview, Financial Health, Customer & Market, Operational Efficiency."
 			),
 			"dashboard": dashboard_name,
 			"active_tab": active_tab,
 			"kpis": kpis_with_data,
-			"question": message or "Generate executive summary from available data."
+			"history": history[-20:],
+			"question": message,
 		}
-		# Ask model to return JSON with a single 'text' key that contains Markdown only
 		resp = llm_client.generate_json(
-			"Return JSON with key 'text' only, where value is Markdown. Do not include any other keys.",
+			"Return JSON with key 'text' only, value is Markdown answer per instructions.",
 			json.dumps(user_obj),
 		)
 		bot_text = ""
