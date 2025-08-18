@@ -212,10 +212,9 @@ def edit_kpi_chat(payload: Dict[str, Any]):
 		history = payload.get('history') or []
 		ctx = payload.get('context') or {}
 		sys = (
-			"You are a senior BI analyst. Think step by step before answering. "
-			"Use the conversation history and the current KPI to propose improvements (chart type, labels, SQL, filters). "
-			"Return strict JSON with keys: 'markdown' (well-formatted Markdown explanation) and optional 'kpi' (partial object with fields to override). "
-			"If proposing a card, set chart_type='card' and omit vega_lite_spec. Ensure non-card SQL outputs x,y or label,value."
+			"You are a KPI editing assistant working with a user to refine one KPI. "
+			"Use the conversation history and the current KPI to suggest improvements. "
+			"When appropriate, propose changes and return JSON with keys 'markdown' (the readable response) and optional 'kpi' (the updated KPI)."
 		)
 		user = json.dumps({"kpi": kpi, "message": message, "history": history[-10:], "context": ctx})
 		resp = llm_client.generate_json(sys, user)
@@ -289,7 +288,7 @@ def list_dashboards():
 		rows = bq_service.list_dashboards(dataset_id=DASH_DATASET)
 		return {"dashboards": rows}
 	except Exception as exc:
-		raise HTTPException(status_code=500, detail:str(exc))
+		raise HTTPException(status_code=500, detail=str(exc))
 
 @app.get("/api/dashboards/{dashboard_id}", response_model=DashboardGetResponse)
 def get_dashboard(dashboard_id: str):
