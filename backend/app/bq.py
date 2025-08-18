@@ -559,3 +559,18 @@ class BigQueryService:
         if errors:
             raise RuntimeError(f"Failed to insert message: {errors}")
         return msg_id
+
+    def list_cxo_messages(self, conversation_id: str, days: int = 30, dataset_id: str = "analytics_cxo") -> List[Dict[str, Any]]:
+        _, msg_fqn = self.ensure_cxo_tables(dataset_id)
+        try:
+            days_int = int(days)
+        except Exception:
+            days_int = 30
+        sql = (
+            f"SELECT role, content, CAST(created_at AS STRING) AS created_at "
+            f"FROM `{msg_fqn}` "
+            f"WHERE conversation_id=@cid AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {days_int} DAY) "
+            f"ORDER BY created_at ASC"
+        )
+        rows = self.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("cid", "STRING", conversation_id)]), location=self.location)
+        return [dict(r) for r in rows]
