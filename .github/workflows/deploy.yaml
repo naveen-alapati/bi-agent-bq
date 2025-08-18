@@ -2,7 +2,7 @@ name: Deploy to Cloud Run
 
 on:
   push:
-    branches: [ Bi-Agent-BQ-v2 ]
+    branches: [ Bi-Agent-cursor-AI ]
 
 jobs:
   deploy:
