@@ -201,9 +201,13 @@ export default function App() {
       sql: item.sql,
       engine: item.engine,
       vega_lite_spec: item.vega_lite_spec,
+      tabs: [activeTab],
     }
     setKpis(prev => [...prev, k])
+    // add to current tab layout
     setLayouts(prev => [...prev, { i: id, x: 0, y: Infinity, w: 6, h: 8 }])
+    setTabLayouts(prev => ({ ...prev, [activeTab]: [ ...(prev[activeTab] || []), { i: id, x: 0, y: Infinity, w: 6, h: 8 } ] }))
+    setDirty(true)
   }
 
   function addTab() {
@@ -488,16 +492,16 @@ export default function App() {
                       onBlur={commitEditTab}
                       onKeyDown={e => { if (e.key === 'Enter') commitEditTab(); if (e.key === 'Escape') cancelEditTab() }}
                       onClick={e => e.stopPropagation()}
-                      style={{ maxWidth: 160 }}
+                      style={{ maxWidth: 260 }}
                     />
                   ) : (
                     <span>{t.name}</span>
                   )}
                 </div>
               ))}
+              <button className="tab-plus" onClick={addTab} title="Add Tab">+</button>
             </div>
             <button className="tab-arrow" onClick={() => { const el = document.getElementById('tabs-scroll'); if (el) el.scrollBy({ left: 160, behavior: 'smooth' }) }}>❯</button>
-            <button className="btn btn-sm" onClick={addTab}>+ Tab</button>
             {activeTab !== 'overview' && <button className="btn btn-sm" onClick={() => { removeTab(activeTab); setDirty(true) }}>Delete Tab</button>}
           </div>
           <GridLayout className="layout" layout={activeLayout} cols={12} rowHeight={30} width={gridW} isResizable isDraggable draggableHandle=".drag-handle" draggableCancel=".no-drag, button, input, textarea, select" onLayoutChange={onLayoutChange}>

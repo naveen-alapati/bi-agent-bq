@@ -162,9 +162,10 @@ body {
 .tabs-bar { display: flex; align-items: center; gap: 0; }
 .tabs-scroll { display: flex; align-items: center; gap: 0; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; flex: 1; }
 .tabs-scroll::-webkit-scrollbar { display: none; }
-.tab-pill { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; letter-spacing: .6px; padding: 16px 36px; font-size: 18px; line-height: 1.6; border-radius: 6px; border: 2px solid var(--border); background: var(--surface); color: var(--fg); cursor: pointer; user-select: none; }
+.tab-pill { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; letter-spacing: .6px; padding: 16px 36px; font-size: 18px; line-height: 1.6; border-radius: 6px; border: 2px solid var(--border); background: var(--surface); color: var(--fg); cursor: pointer; user-select: none; transition: background .15s ease, box-shadow .15s ease, transform .1s ease; }
 .tab-pill + .tab-pill { margin-left: -2px; } /* collapse adjacent borders */
-.tab-pill.active { background: var(--primary); color: #fff; border-color: var(--primary); box-shadow: 0 2px 10px rgba(0,0,0,0.12); }
+.tab-pill:hover:not(.active) { background: #f3f4f6; border-color: var(--primary); }
+.tab-pill.active { position: relative; background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.06)), var(--primary); color: #fff; border-color: var(--primary); box-shadow: inset 0 3px 6px rgba(0,0,0,0.12), inset 0 -2px 0 rgba(0,0,0,0.2), 0 3px 12px rgba(0,0,0,0.2); transform: translateY(1px); }
 .tab-arrow { display: inline-flex; align-items: center; justify-content: center; padding: 10px 14px; font-size: 18px; color: var(--fg); border: 2px solid var(--border); border-radius: 6px; background: var(--card); cursor: pointer; user-select: none; }
 .tab-arrow:hover { filter: brightness(0.98); }
 
@@ -181,3 +182,6 @@ body {
 .typing .dot:nth-child(2) { animation-delay: 0.15s; }
 .typing .dot:nth-child(3) { animation-delay: 0.3s; }
 @keyframes bounce { 0% { transform: translateY(0); opacity: .3 } 30% { transform: translateY(-3px); opacity: .9 } 60% { transform: translateY(0); opacity: .5 } 100% { transform: translateY(0); opacity: .3 } }
+
+.tab-plus { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border: 2px solid var(--border); background: var(--card); color: var(--fg); border-radius: 6px; margin-left: -2px; cursor: pointer; user-select: none; font-weight: 700; }
+.tab-plus:hover { background: var(--surface); }
