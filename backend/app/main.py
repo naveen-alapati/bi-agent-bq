@@ -250,59 +250,6 @@ def get_default_dashboard():
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
-
-@app.post("/api/export/card")
-def export_card(payload: Dict[str, Any]):
-	try:
-		sql = payload.get('sql', '')
-		rows = bq_service.query_rows(sql)
-		# CSV export
-		output = io.StringIO()
-		writer = None
-		for r in rows:
-			if writer is None:
-				writer = csv.DictWriter(output, fieldnames=list(r.keys()))
-				writer.writeheader()
-			writer.writerow(r)
-		output.seek(0)
-		return StreamingResponse(iter([output.getvalue()]), media_type='text/csv', headers={'Content-Disposition': 'attachment; filename="card.csv"'})
-	except Exception as exc:
-		raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.post("/api/export/dashboard")
-def export_dashboard(payload: Dict[str, Any]):
-	try:
-		kpis = payload.get('kpis', [])
-		archive = io.BytesIO()
-		with zipfile.ZipFile(archive, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
-			for i, k in enumerate(kpis):
-				sql = k.get('sql', '')
-				rows = bq_service.query_rows(sql)
-				csv_buf = io.StringIO()
-				writer = None
-				for r in rows:
-					if writer is None:
-						writer = csv.DictWriter(csv_buf, fieldnames=list(r.keys()))
-						writer.writeheader()
-					writer.writerow(r)
-				csv_content = csv_buf.getvalue()
-				zf.writestr(f"card_{i+1}.csv", csv_content)
-		archive.seek(0)
-		return StreamingResponse(archive, media_type='application/zip', headers={'Content-Disposition': 'attachment; filename="dashboard.zip"'})
-	except Exception as exc:
-		raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.get("/api/selftest")
-def api_selftest(dataset: Optional[str] = None, limit_tables: int = 3, sample_rows: int = 3, k: int = 3, run_kpis_limit: int = 2, force_llm: bool = True):
-	try:
-		report = run_self_test(bq_service, kpi_service, dataset=dataset, limit_tables=limit_tables, sample_rows=sample_rows, kpis_k=k, run_kpis_limit=run_kpis_limit, force_llm=force_llm)
-		return report
-	except Exception as exc:
-		return {"error": str(exc)}
-
-
 # Dashboard APIs
 @app.post("/api/dashboards", response_model=DashboardSaveResponse)
 def save_dashboard(req: DashboardSaveRequest):
@@ -332,7 +279,6 @@ def save_dashboard(req: DashboardSaveRequest):
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
-
 @app.get("/api/dashboards", response_model=DashboardListResponse)
 def list_dashboards():
 	try:
@@ -340,7 +286,6 @@ def list_dashboards():
 		return {"dashboards": rows}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
-
 
 @app.get("/api/dashboards/{dashboard_id}", response_model=DashboardGetResponse)
 def get_dashboard(dashboard_id: str):
@@ -354,124 +299,22 @@ def get_dashboard(dashboard_id: str):
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
-
-@app.post("/api/kpi_catalog", response_model=Dict[str, Any])
-def kpi_catalog_add(req: KPICatalogAddRequest):
+@app.delete("/api/dashboards/{dashboard_id}")
+def delete_dashboard(dashboard_id: str, all_versions: bool = False):
 	try:
-		items = []
-		for k in req.kpis:
-			item = k.model_dump() if hasattr(k, 'model_dump') else dict(k)
-			item['dataset_id'] = req.datasetId
-			item['table_id'] = req.tableId
-			item['tags'] = {"datasetId": req.datasetId, "tableId": req.tableId}
-			items.append(item)
-		count = bq_service.add_to_kpi_catalog(items, dataset_id=DASH_DATASET)
-		return {"inserted": count}
-	except Exception as exc:
-		raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.get("/api/kpi_catalog", response_model=KPICatalogListResponse)
-def kpi_catalog_list(datasetId: Optional[str] = None, tableId: Optional[str] = None):
-	try:
-		rows = bq_service.list_kpi_catalog(dataset_id=DASH_DATASET, dataset_filter=datasetId, table_filter=tableId)
-		return {"items": rows}
-	except Exception as exc:
-		raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.post("/api/cxo/start")
-def cxo_start(payload: Dict[str, Any]):
-	try:
-		dashboard_id = payload.get('dashboard_id') or ''
-		dashboard_name = payload.get('dashboard_name') or ''
-		active_tab = payload.get('active_tab') or 'overview'
-		conv_id = bq_service.create_cxo_conversation(dashboard_id, dashboard_name, active_tab, cxo_name="Naveen Alapati", cxo_title="CEO")
-		return {"conversation_id": conv_id}
-	except Exception as exc:
-		raise HTTPException(status_code=500, detail=str(exc))
-
-@app.post("/api/cxo/send")
-def cxo_send(payload: Dict[str, Any]):
-	try:
-		conversation_id = payload.get('conversation_id')
-		message = payload.get('message') or ''
-		context = payload.get('context') or {}
-		if not conversation_id:
-			raise HTTPException(status_code=400, detail="conversation_id required")
-		# store user message with embedding
-		user_emb = None
-		try:
-			user_emb = embedding_service.embed_text(message)
-		except Exception:
-			user_emb = []
-		bq_service.add_cxo_message(conversation_id, role="user", content=message, embedding=user_emb)
-		# recent history (last 30 days)
-		history = bq_service.list_cxo_messages(conversation_id, days=30)
-		# build prompt from context (KPIs data summaries) and user message
-		kpis = context.get('kpis') or []
-		active_tab = context.get('active_tab') or 'overview'
-		dashboard_name = context.get('dashboard_name') or ''
-		# Aggregate KPI data (capped)
-		kpis_with_data = []
-		for k in kpis:
-			rows = k.get('rows') or []
-			if rows:
-				kpis_with_data.append({"id": k.get('id'), "name": k.get('name'), "rows": rows[:100]})
-		if not kpis_with_data:
-			resp_md = "No data is available for the current tab. Run or refresh KPIs to generate a summary."
-			bq_service.add_cxo_message(conversation_id, role="assistant", content=resp_md, embedding=[])
-			return {"reply": resp_md}
-		# System and user directives
-		sys = (
-			"You are CXO AI Assist for a CEO named Naveen Alapati. Professional strategist tone. "
-			"Use only the provided KPI data rows and recent chat history (last 30 days). Be interactive: "
-			"- If user asks broadly (e.g., 'areas that need attention'), list top 2–3 options and ask which one to drill into. "
-			"- If user says 'Pick one', choose the highest urgency/risk item. "
-			"- Avoid repeating prior summaries; add incremental insights. "
-			"- Provide 3–5 bullets max and propose next steps (owner, timeline). "
-			"- If data is insufficient, ask a clarifying question before answering. "
-			"Output strictly Markdown with clear headings and bullet lists. No JSON."
-		)
-		user_obj = {
-			"instruction": (
-				"Create a CXO-ready Markdown summary focused on THREE sections (omit any without sufficient data):\n\n"
-				"1. Executive Calls to Action — 3 bullets max; each bullet should include owner, due date, and measurable outcome.\n"
-				"2. Financial Bridge and Sensitivities — a short 'what moved the number' bridge note and 1–2 bullets on the most material sensitivities (e.g., conversion, price, mix).\n"
-				"3. Risk and Compliance Watchlist — 2–3 bullets on the most urgent risks (operational, data/fraud, regulatory) with mitigation steps.\n\n"
-				"Rules: Avoid repetition; keep to 3–5 bullets per section; be precise and action-oriented.\n"
-				"End with a brief call-to-action line inviting the CXO to interact with CXO AI Assist for deeper insights and a next-step action plan, and include the dashboard link: https://analytics-kpi-poc-315425729064.asia-south1.run.app"
-			),
-			"dashboard": dashboard_name,
-			"active_tab": active_tab,
-			"kpis": kpis_with_data,
-			"history": history[-20:],
-			"question": message,
-		}
-		resp = llm_client.generate_json(
-			"Return JSON with key 'text' only, value is Markdown answer per instructions.",
-			json.dumps(user_obj),
-		)
-		bot_text = ""
-		try:
-			bot_text = resp.get('text') if isinstance(resp, dict) else ""
-		except Exception:
-			bot_text = ""
-		if not bot_text:
-			bot_text = "No summary could be generated."
-		# store assistant message with embedding
-		asst_emb = None
-		try:
-			asst_emb = embedding_service.embed_text(bot_text)
-		except Exception:
-			asst_emb = []
-		bq_service.add_cxo_message(conversation_id, role="assistant", content=bot_text, embedding=asst_emb)
-		return {"reply": bot_text}
+		name = None
+		if all_versions:
+			row = bq_service.get_dashboard(dashboard_id=dashboard_id, dataset_id=DASH_DATASET)
+			if row:
+				name = row.get("name")
+			else:
+				raise HTTPException(status_code=404, detail="Dashboard not found")
+		count = bq_service.delete_dashboard(dataset_id=DASH_DATASET, dashboard_id=None if all_versions else dashboard_id, name=name, all_versions=all_versions)
+		return {"deleted": count}
 	except HTTPException:
 		raise
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
-
 
 # Serve built SPA (Dockerfile copies frontend/dist to /app/static)
 static_dir = os.path.abspath(os.getenv("STATIC_DIR", "/app/static"))
