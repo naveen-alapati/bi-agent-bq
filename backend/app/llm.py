@@ -18,32 +18,13 @@ class LLMClient:
         self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
     def generate_json(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
-        """Generate JSON with provider fallback (gemini -> openai -> vertex)."""
-        last_error: Optional[str] = None
-        provider_order: List[str] = []
-        # prioritise configured provider first
-        if self.provider:
-            provider_order.append(self.provider)
-        # then add others based on available creds
-        if "gemini" not in provider_order and self.gemini_api_key:
-            provider_order.append("gemini")
-        if "openai" not in provider_order and self.openai_api_key:
-            provider_order.append("openai")
-        if "vertex" not in provider_order:
-            provider_order.append("vertex")
-        for prov in provider_order:
-            try:
-                if prov == "gemini":
-                    return self._generate_gemini(system_prompt, user_prompt)
-                if prov == "openai":
-                    return self._generate_openai(system_prompt, user_prompt)
-                if prov == "vertex":
-                    return self._generate_vertex(system_prompt, user_prompt)
-            except Exception as exc:
-                last_error = str(exc)
-                continue
-        # if all fail, return empty dict so callers can fallback gracefully
-        return {}
+        if self.provider == "vertex":
+            return self._generate_vertex(system_prompt, user_prompt)
+        if self.provider == "openai":
+            return self._generate_openai(system_prompt, user_prompt)
+        if self.provider == "gemini":
+            return self._generate_gemini(system_prompt, user_prompt)
+        raise RuntimeError("Unsupported LLM_PROVIDER")
 
     def _generate_vertex(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         from google.cloud import aiplatform
