@@ -58,7 +58,7 @@ export function TopBar({
         {version && <span className="badge">v{version}</span>}
         {dirty ? (
           <>
-            <button className="btn btn-primary" onClick={onSave}>Save</button>
+            <button className="btn btn-primary" data-tour="editor-save" onClick={onSave}>Save</button>
             <button className="btn btn-ghost" onClick={onSaveAs}>Save As</button>
           </>
         ) : null}

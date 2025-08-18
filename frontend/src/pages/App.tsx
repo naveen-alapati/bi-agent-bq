@@ -59,11 +59,11 @@ export default function App() {
   const [tourRun, setTourRun] = useState(false)
   const editorTourDone = Cookies.get('tour_editor_done') === '1'
   const editorSteps: Step[] = [
-    { target: '.topbar .btn.btn-primary', content: 'Save appears only after changes. Use Set as Default to load this dashboard first on Home.', placement: 'bottom' },
-    { target: '.panel .section-title', content: 'Select tables and Analyze to generate KPIs; they auto-save to KPI Catalog.', placement: 'right' },
-    { target: '.panel .scroll', content: 'KPI Catalog: Add KPIs; they land in the current tab and auto-run.', placement: 'right' },
-    { target: '.layout', content: 'Drag/resize cards. Only the header acts as drag handle so toolbar buttons won\'t drag.', placement: 'top' },
-    { target: '.card .card-actions .btn.btn-sm:last-child', content: 'Open AI Edit for interactive refinement with readable Markdown replies.', placement: 'left' },
+    { target: '[data-tour="editor-save"]', content: 'Save appears only after changes. Use Set as Default to load this dashboard first on Home.', placement: 'bottom' },
+    { target: '[data-tour="editor-data"]', content: 'Select tables and Analyze to generate KPIs; they auto-save to KPI Catalog.', placement: 'right' },
+    { target: '[data-tour="editor-kpi-catalog"]', content: 'KPI Catalog: Add KPIs; they land in the current tab and auto-run.', placement: 'right' },
+    { target: '[data-tour="editor-grid"]', content: 'Drag/resize cards. Only the header acts as drag handle so toolbar buttons won\'t drag.', placement: 'top' },
+    { target: '[data-tour="editor-ai-edit"]', content: 'Open AI Edit for interactive refinement with readable Markdown replies.', placement: 'left' },
   ]
   useEffect(() => { if (!editorTourDone) setTourRun(true) }, [])
   const onEditorTourCb = (data: CallBackProps) => {
@@ -370,7 +370,7 @@ export default function App() {
         {(
           <div className={`sidebar ${!sidebarOpen ? 'is-collapsed' : ''}`} style={{ display: 'grid', gap: 12 }}>
             {/* left panels */}
-            <div className="panel">
+            <div className="panel" data-tour="editor-data">
               <div className="section-title">Theme</div>
               <div className="toolbar">
                 <div>
@@ -406,7 +406,7 @@ export default function App() {
             </div>
             <div className="panel">
               <div className="section-title">KPI Catalog</div>
-              <KPICatalog onAdd={addKpiToCanvas} />
+              <div data-tour="editor-kpi-catalog"><KPICatalog onAdd={addKpiToCanvas} /></div>
             </div>
             <div className="panel">
               <div className="section-title">Dashboards</div>
@@ -534,7 +534,7 @@ export default function App() {
             <button className="tab-arrow" onClick={() => { const el = document.getElementById('tabs-scroll'); if (el) el.scrollBy({ left: 160, behavior: 'smooth' }) }}>❯</button>
             {activeTab !== 'overview' && <button className="btn btn-sm" onClick={() => { removeTab(activeTab); setDirty(true) }}>Delete Tab</button>}
           </div>
-          <GridLayout className="layout" layout={activeLayout} cols={12} rowHeight={30} width={gridW} isResizable isDraggable draggableHandle=".drag-handle" draggableCancel=".no-drag, button, input, textarea, select" onLayoutChange={onLayoutChange}>
+          <GridLayout className="layout" data-tour="editor-grid" layout={activeLayout} cols={12} rowHeight={30} width={gridW} isResizable isDraggable draggableHandle=".drag-handle" draggableCancel=".no-drag, button, input, textarea, select" onLayoutChange={onLayoutChange}>
             {visibleKpis.map(k => (
               <div key={k.id} data-grid={(activeLayout||[]).find(l => l.i === k.id)} className="card" style={{ display: 'flex', flexDirection: 'column' }}>
                 <div className="card-header">
@@ -542,7 +542,7 @@ export default function App() {
                   <div className="card-actions no-drag">
                     <button className="btn btn-sm" onClick={() => runKpi(k)}>Test</button>
                     <button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
-                    <button className="btn btn-sm" onClick={() => openAiEdit(k)}>AI Edit</button>
+                    <button className="btn btn-sm" data-tour="editor-ai-edit" onClick={() => openAiEdit(k)}>AI Edit</button>
                     <button className="btn btn-sm" onClick={async () => {
                       const r = await fetch('/api/export/card', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql: k.sql }) }); const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${k.name||'card'}.csv`; a.click(); URL.revokeObjectURL(url)
                     }}>Export</button>
