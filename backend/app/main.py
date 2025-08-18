@@ -246,7 +246,10 @@ def set_default_dashboard(payload: Dict[str, str]):
 def get_default_dashboard():
 	try:
 		did = bq_service.get_default_dashboard(dataset_id=DASH_DATASET)
-		return {"id": did}
+		if not did:
+			return {"id": None}
+		row = bq_service.get_dashboard(dashboard_id=did, dataset_id=DASH_DATASET)
+		return {"id": did if row else None}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
