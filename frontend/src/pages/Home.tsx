@@ -59,6 +59,7 @@ export default function Home() {
     // dedupe by name, keep latest updated_at, but preserve default flag if known
     const byName: Record<string, any> = {}
     for (const d of rows || []) {
+      if (d.hidden) continue
       const key = d.name
       const prev = byName[key]
       if (!prev) byName[key] = d

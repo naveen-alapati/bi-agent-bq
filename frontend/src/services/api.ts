@@ -21,7 +21,7 @@ export const api = {
     const r = await axios.post('/api/run_kpi', { sql, filters, date_column, expected_schema })
     return r.data.rows
   },
-  async saveDashboard(payload: { id?: string, name: string, kpis: any[], layout?: any[], layouts?: any, selected_tables: any[], global_filters?: any, theme?: any, tabs?: any[], tab_layouts?: Record<string, any[]>, last_active_tab?: string, version?: string }) {
+  async saveDashboard(payload: { id?: string, name: string, kpis: any[], layout?: any[], layouts?: any, selected_tables: any[], global_filters?: any, theme?: any, tabs?: any[], tab_layouts?: Record<string, any[]>, last_active_tab?: string, version?: string, hidden?: boolean }) {
     const r = await axios.post('/api/dashboards', payload)
     return r.data
   },

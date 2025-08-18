@@ -27,6 +27,8 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [dashboardName, setDashboardName] = useState('ecom-v1')
+  const [originalName, setOriginalName] = useState<string>('')
+  const [originalId, setOriginalId] = useState<string>('')
   const [version, setVersion] = useState<string>('')
   const [layouts, setLayouts] = useState<Layout[]>([])
   const [dashList, setDashList] = useState<any[]>([])
@@ -34,6 +36,7 @@ export default function App() {
   const [globalDate, setGlobalDate] = useState<{from?: string, to?: string}>({})
   const [crossFilter, setCrossFilter] = useState<any>(null)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const [hidden, setHidden] = useState<boolean>(false)
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true)
   const gridWrapRef = useRef<HTMLDivElement | null>(null)
   const [gridW, setGridW] = useState<number>(1000)
@@ -101,6 +104,8 @@ export default function App() {
     if (!routeId) return
     api.getDashboard(routeId).then(d => {
       setDashboardName(d.name)
+      setOriginalName(d.name || '')
+      setOriginalId(d.id || '')
       setVersion(d.version || '')
       setKpis(d.kpis.map((k:any) => ({ ...k, tabs: Array.isArray(k.tabs) && k.tabs.length ? k.tabs : ['overview'] })))
       const nextTabs = (d.tabs && d.tabs.length ? d.tabs : [{ id: 'overview', name: 'Overview', order: 0 }])
@@ -115,6 +120,7 @@ export default function App() {
       setTheme(mode === 'dark' ? 'dark' : 'light')
       const savedPal = (d.theme && (d.theme.palette as any)) || null
       if (savedPal && savedPal.primary) { setPalette(savedPal); applyPalette(savedPal) } else { applyPalette(palette) }
+      setHidden(Boolean(d.hidden))
       setDirty(false)
     }).catch(() => {})
   }, [routeId])
@@ -170,10 +176,11 @@ export default function App() {
   async function saveDashboard(asNew?: boolean) {
     setSaving(true)
     try {
+      const isRename = Boolean(routeId && originalName && (dashboardName.trim() !== originalName))
       const payload = {
-        id: asNew ? undefined : (routeId || undefined),
+        id: (asNew || isRename) ? undefined : (routeId || undefined),
         name: dashboardName,
-        version: asNew ? '1.0.0' : undefined,
+        version: (asNew || isRename) ? '1.0.0' : undefined,
         kpis,
         layout: layouts,
         layouts: undefined,
@@ -183,15 +190,18 @@ export default function App() {
         tabs,
         tab_layouts: tabLayouts,
         last_active_tab: activeTab,
+        hidden,
       }
       const res = await api.saveDashboard(payload as any)
       setVersion(res.version)
       await api.listDashboards().then(setDashList)
       toast('success', `Saved ${res.name} v${res.version}`)
       setDirty(false)
-      // If this was a Save As, navigate to the new dashboard id so future saves update the same record
-      if (asNew && res.id && res.id !== routeId) {
+      // Navigate to the saved dashboard id if changed (e.g., rename created new id)
+      if (res.id && res.id !== routeId) {
         navigate(`/editor/${res.id}`)
+        setOriginalId(res.id)
+        setOriginalName(res.name || dashboardName)
       }
     } catch (e: any) {
       toast('error', e?.message || 'Failed to save')
@@ -364,7 +374,6 @@ export default function App() {
         version={version}
         onNameChange={(v) => { setDashboardName(v); setDirty(true) }}
         onSave={() => saveDashboard(false)}
-        onSaveAs={() => saveDashboard(true)}
         globalDate={globalDate}
         onGlobalDateChange={(v) => { setGlobalDate(v); setDirty(true) }}
         theme={theme}
@@ -504,6 +513,10 @@ export default function App() {
                 if (current?.id) { await api.setDefaultDashboard(current.id); toast('success','Set as default dashboard') } else { toast('error','Save first') }
               } catch(e:any){ toast('error', e?.message||'Failed') }
             }}>Default</button>
+            <label style={{ marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={hidden} onChange={(e) => { setHidden(e.target.checked); setDirty(true) }} />
+              <span className="card-subtitle">Hide from Home</span>
+            </label>
           </div>
 
           <div className="tabs-bar">

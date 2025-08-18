@@ -121,6 +121,8 @@ class DashboardSaveRequest(BaseModel):
 	selected_tables: List[TableRef]
 	global_filters: Optional[Dict[str, Any]] = None
 	theme: Optional[Dict[str, Any]] = None
+	# Visibility
+	hidden: Optional[bool] = False
 	# New
 	tabs: Optional[List[DashboardTab]] = None
 	tab_layouts: Optional[Dict[str, List[Dict[str, Any]]]] = None
@@ -137,6 +139,7 @@ class DashboardSummary(BaseModel):
 	id: str
 	name: str
 	version: Optional[str] = None
+	hidden: Optional[bool] = False
 	created_at: Optional[str] = None
 	updated_at: Optional[str] = None
 
@@ -155,6 +158,7 @@ class DashboardGetResponse(BaseModel):
 	selected_tables: List[TableRef]
 	global_filters: Optional[Dict[str, Any]] = None
 	theme: Optional[Dict[str, Any]] = None
+	hidden: Optional[bool] = False
 	created_at: Optional[str] = None
 	updated_at: Optional[str] = None
 	# New
