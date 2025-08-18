@@ -407,7 +407,7 @@ def cxo_send(payload: Dict[str, Any]):
 			"- Avoid repeating prior summaries; add incremental insights. "
 			"- Provide 3–5 bullets max and propose next steps (owner, timeline). "
 			"- If data is insufficient, ask a clarifying question before answering. "
-			"Output strictly Markdown (no JSON)."
+			"Output strictly Markdown with clear headings and bullet lists. No JSON."
 		)
 		user_obj = {
 			"instruction": (

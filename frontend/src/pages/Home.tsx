@@ -3,6 +3,7 @@ import { api } from '../services/api'
 import GridLayout, { Layout } from 'react-grid-layout'
 import { ChartRenderer } from '../ui/ChartRenderer'
 import '../styles.css'
+import ReactMarkdown from 'react-markdown'
 
 export default function Home() {
   const [dashboards, setDashboards] = useState<any[]>([])
@@ -155,8 +156,8 @@ export default function Home() {
               <div style={{ flex: 1, overflow: 'auto', padding: 8 }}>
                 {chat.map((m, i) => (
                   <div key={i} style={{ marginBottom: 10, textAlign: m.role==='user' ? 'right':'left' }}>
-                    <div style={{ display: 'inline-block', padding: '8px 12px', borderRadius: 12, background: m.role==='user' ? 'var(--primary)' : 'var(--surface)', color: m.role==='user' ? '#fff' : 'var(--fg)' }}>
-                      {m.text}
+                    <div style={{ display: 'inline-block', padding: '10px 12px', borderRadius: 12, background: m.role==='user' ? 'var(--primary)' : 'var(--surface)', color: m.role==='user' ? '#fff' : 'var(--fg)', maxWidth: 520, textAlign: 'left' }}>
+                      {m.role==='assistant' ? <ReactMarkdown>{m.text}</ReactMarkdown> : m.text}
                     </div>
                   </div>
                 ))}
