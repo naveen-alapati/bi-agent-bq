@@ -416,6 +416,28 @@ export default function App() {
           <div className={`sidebar ${!sidebarOpen ? 'is-collapsed' : ''}`} style={{ display: 'grid', gap: 12 }}>
             {/* left panels */}
             <div className="panel">
+              <div className="section-title">Theme</div>
+              <div className="toolbar">
+                <div>
+                  <label className="card-subtitle">Primary</label>
+                  <input className="input" type="color" value={palette.primary} onChange={e => { const p = { ...palette, primary: e.target.value }; setPalette(p); applyPalette(p); setDirty(true) }} />
+                </div>
+                <div>
+                  <label className="card-subtitle">Accent</label>
+                  <input className="input" type="color" value={palette.accent} onChange={e => { const p = { ...palette, accent: e.target.value }; setPalette(p); applyPalette(p); setDirty(true) }} />
+                </div>
+                <div>
+                  <label className="card-subtitle">Surface</label>
+                  <input className="input" type="color" value={palette.surface} onChange={e => { const p = { ...palette, surface: e.target.value }; setPalette(p); applyPalette(p); setDirty(true) }} />
+                </div>
+                <div>
+                  <label className="card-subtitle">Warn</label>
+                  <input className="input" type="color" value={palette.warn} onChange={e => { const p = { ...palette, warn: e.target.value }; setPalette(p); applyPalette(p); setDirty(true) }} />
+                </div>
+                <button className="btn btn-sm" onClick={() => { setPalette(defaultPalette); applyPalette(defaultPalette); setDirty(true) }}>Reset Palette</button>
+              </div>
+            </div>
+            <div className="panel">
               <div className="section-title">Data</div>
               {loadError && <div className="badge" style={{ marginBottom: 8, borderColor: 'crimson', color: 'crimson', background: 'rgba(220,20,60,0.06)' }}>{loadError}</div>}
               {datasets.length === 0 ? (
@@ -504,30 +526,6 @@ export default function App() {
                     <button className="btn btn-sm" onClick={() => toggleKpiTab(k, activeTab)}>{(k.tabs||[]).includes(activeTab)? 'Remove from Tab':'Add to Tab'}</button>
                   </label>
                 ))}
-              </div>
-            </div>
-            
-            {/* Theme section moved to bottom */}
-            <div className="panel">
-              <div className="section-title">Theme</div>
-              <div className="toolbar">
-                <div>
-                  <label className="card-subtitle">Primary</label>
-                  <input className="input" type="color" value={palette.primary} onChange={e => { const p = { ...palette, primary: e.target.value }; setPalette(p); applyPalette(p); setDirty(true) }} />
-                </div>
-                <div>
-                  <label className="card-subtitle">Accent</label>
-                  <input className="input" type="color" value={palette.accent} onChange={e => { const p = { ...palette, accent: e.target.value }; setPalette(p); applyPalette(p); setDirty(true) }} />
-                </div>
-                <div>
-                  <label className="card-subtitle">Surface</label>
-                  <input className="input" type="color" value={palette.surface} onChange={e => { const p = { ...palette, surface: e.target.value }; setPalette(p); applyPalette(p); setDirty(true) }} />
-                </div>
-                <div>
-                  <label className="card-subtitle">Warn</label>
-                  <input className="input" type="color" value={palette.warn} onChange={e => { const p = { ...palette, warn: e.target.value }; setPalette(p); applyPalette(p); setDirty(true) }} />
-                </div>
-                <button className="btn btn-sm" onClick={() => { setPalette(defaultPalette); applyPalette(defaultPalette); setDirty(true) }}>Reset Palette</button>
               </div>
             </div>
           </div>
