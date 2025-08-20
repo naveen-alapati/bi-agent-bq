@@ -57,6 +57,9 @@ export default function App() {
   const [aiInput, setAiInput] = useState('')
   const [aiTyping, setAiTyping] = useState(false)
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0)
+  const [aiModalPosition, setAiModalPosition] = useState({ x: 0, y: 0 })
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
 
   function applyPalette(p: { primary: string; accent: string; surface: string; warn: string }) {
     const r = document.documentElement
@@ -65,6 +68,50 @@ export default function App() {
     r.style.setProperty('--surface', p.surface)
     r.style.setProperty('--warn', p.warn)
   }
+
+  // AI Modal drag handlers
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) {
+      setIsDragging(true)
+      const rect = e.currentTarget.getBoundingClientRect()
+      setDragOffset({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      })
+    }
+  }
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (isDragging) {
+      const modalWidth = 840
+      const modalHeight = 70 * window.innerHeight / 100
+      
+      // Calculate new position
+      let newX = e.clientX - dragOffset.x
+      let newY = e.clientY - dragOffset.y
+      
+      // Apply boundary constraints
+      newX = Math.max(0, Math.min(newX, window.innerWidth - modalWidth))
+      newY = Math.max(0, Math.min(newY, window.innerHeight - modalHeight))
+      
+      setAiModalPosition({ x: newX, y: newY })
+    }
+  }
+
+  const handleMouseUp = () => {
+    setIsDragging(false)
+  }
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove)
+        document.removeEventListener('mouseup', handleMouseUp)
+      }
+    }
+  }, [isDragging, dragOffset])
 
   useEffect(() => { applyPalette(palette) }, [])
 
@@ -357,6 +404,11 @@ export default function App() {
     setAiEditKpi(k)
     setAiChat([{ role: 'assistant', text: 'Let\'s refine this KPI. Tell me what you\'d like to change (chart type, labels, SQL, grouping, filters).' }])
     setAiEditOpen(true)
+    
+    // Center the modal on screen when it opens
+    const centerX = Math.max(0, (window.innerWidth - 840) / 2)
+    const centerY = Math.max(0, (window.innerHeight - 70 * window.innerHeight / 100) / 2)
+    setAiModalPosition({ x: centerX, y: centerY })
   }
 
   async function sendAiEdit() {
@@ -597,10 +649,40 @@ export default function App() {
         </div>
       </div>
       {aiEditOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-          <div style={{ width: 'min(840px, 92vw)', height: 'min(70vh, 85vh)', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderBottom: '1px solid var(--border)' }}>
-              <div className="card-title">AI Edit: {aiEditKpi?.name}</div>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999 }}>
+          <div 
+            style={{ 
+              position: 'absolute',
+              left: aiModalPosition.x,
+              top: aiModalPosition.y,
+              width: 'min(840px, 92vw)', 
+              height: 'min(70vh, 85vh)', 
+              background: 'var(--card)', 
+              border: '1px solid var(--border)', 
+              borderRadius: 12, 
+              display: 'flex', 
+              flexDirection: 'column',
+              cursor: isDragging ? 'grabbing' : 'default',
+              transition: isDragging ? 'none' : 'box-shadow 0.2s ease',
+              boxShadow: isDragging ? '0 8px 32px rgba(0,0,0,0.3)' : 'var(--shadow)'
+            }}
+          >
+            <div 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'space-between', 
+                padding: 12, 
+                borderBottom: '1px solid var(--border)',
+                cursor: 'grab',
+                userSelect: 'none'
+              }}
+              onMouseDown={handleMouseDown}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: '14px', opacity: 0.6 }}>⋮⋮</span>
+                <div className="card-title">AI Edit: {aiEditKpi?.name}</div>
+              </div>
               <div className="toolbar">
                 <button className="btn btn-sm" onClick={() => setAiEditOpen(false)}>✕</button>
               </div>
