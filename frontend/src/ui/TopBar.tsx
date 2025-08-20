@@ -14,7 +14,6 @@ export function TopBar({
   sidebarOpen,
   dirty,
   dashboardId,
-  onDeleteDashboard,
 }: {
   name: string
   version?: string
@@ -29,7 +28,6 @@ export function TopBar({
   sidebarOpen?: boolean
   dirty?: boolean
   dashboardId?: string
-  onDeleteDashboard?: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(name)
@@ -61,11 +59,6 @@ export function TopBar({
         {dirty ? (
           <button className="btn btn-primary" onClick={onSave}>Save</button>
         ) : null}
-        {dashboardId && onDeleteDashboard && (
-          <button className="btn btn-sm" onClick={onDeleteDashboard} style={{ background: 'var(--warn)', color: '#fff', borderColor: 'var(--warn)' }}>
-            Delete
-          </button>
-        )}
       </div>
       <div className="toolbar" style={{ alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

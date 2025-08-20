@@ -247,23 +247,7 @@ export default function App() {
 
 
 
-  async function deleteDashboard() {
-    if (!routeId) {
-      toast('error', 'Cannot delete unsaved dashboard')
-      return
-    }
-    
-    if (window.confirm(`Are you sure you want to delete "${dashboardName}"? This action cannot be undone.`)) {
-      try {
-        await api.deleteDashboard(routeId)
-        toast('success', 'Dashboard deleted')
-        // Redirect to home page after deletion
-        window.location.href = '/'
-      } catch (error) {
-        toast('error', 'Failed to delete dashboard')
-      }
-    }
-  }
+
 
   async function addKpiToCanvas(item: any) {
     const id = `${item.dataset_id}.${item.table_id}:${item.id}`
@@ -405,22 +389,21 @@ export default function App() {
       <div className="toast-container">
         {toasts.map(t => (<div key={t.id} className={`toast ${t.type==='success'?'toast-success':'toast-error'}`}>{t.msg}</div>))}
       </div>
-      <TopBar
-        name={dashboardName}
-        version={version}
-        onNameChange={(v) => { setDashboardName(v); setDirty(true) }}
-        onSave={() => saveDashboard()}
-        globalDate={globalDate}
-        onGlobalDateChange={(v) => { setGlobalDate(v); setDirty(true) }}
-        theme={theme}
-        onThemeToggle={() => setTheme(t => (t === 'light' ? 'dark' : 'light'))}
-        onExportDashboard={exportDashboard}
-        onToggleSidebar={() => setSidebarOpen(o => !o)}
-        sidebarOpen={sidebarOpen}
-        dirty={dirty}
-        dashboardId={routeId}
-        onDeleteDashboard={deleteDashboard}
-      />
+        <TopBar
+          name={dashboardName}
+          version={version}
+          onNameChange={(v) => { setDashboardName(v); setDirty(true) }}
+          onSave={() => saveDashboard()}
+          globalDate={globalDate}
+          onGlobalDateChange={(v) => { setGlobalDate(v); setDirty(true) }}
+          theme={theme}
+          onThemeToggle={() => setTheme(t => (t === 'light' ? 'dark' : 'light'))}
+          onExportDashboard={exportDashboard}
+          onToggleSidebar={() => setSidebarOpen(o => !o)}
+          sidebarOpen={sidebarOpen}
+          dirty={dirty}
+          dashboardId={routeId}
+        />
 
       <div className={`app-grid ${!sidebarOpen ? 'app-grid--collapsed' : ''}`}>
         {(
