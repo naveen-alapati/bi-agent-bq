@@ -62,15 +62,37 @@ class BigQueryService:
         datasets = []
         # List of datasets that are created by the backend app
         backend_datasets = {
-            "analytics_dash",  # Dashboard storage
-            "embeddings",      # Vector embeddings
-            "kpi_catalog",     # KPI catalog storage
-            "analytics_cache", # Analytics cache
-            "temp_analytics"   # Temporary analytics
+            "analytics_dash",    # Dashboard storage
+            "analytics_poc",     # Analytics POC embeddings
+            "analytics_cxo",     # CXO conversations
+            "embeddings",        # Vector embeddings
+            "kpi_catalog",       # KPI catalog storage
+            "analytics_cache",   # Analytics cache
+            "temp_analytics",    # Temporary analytics
+            "analytics_embeddings",  # Alternative embeddings dataset
+            "analytics_temp",    # Temporary analytics (alternative naming)
+            "analytics_staging", # Staging environment
+            "analytics_dev",     # Development environment
+            "analytics_test"     # Test environment
         }
         
         for ds in self.client.list_datasets(project=self.project_id):
+            # Check if dataset is in our explicit list
             is_backend_created = ds.dataset_id in backend_datasets
+            
+            # Also check for common naming patterns that indicate backend-created datasets
+            if not is_backend_created:
+                is_backend_created = (
+                    ds.dataset_id.startswith('analytics_') or
+                    ds.dataset_id.startswith('embeddings') or
+                    ds.dataset_id.startswith('kpi_') or
+                    ds.dataset_id.startswith('temp_') or
+                    ds.dataset_id.startswith('cache_') or
+                    ds.dataset_id.startswith('staging_') or
+                    ds.dataset_id.startswith('dev_') or
+                    ds.dataset_id.startswith('test_')
+                )
+            
             datasets.append(
                 {
                     "datasetId": ds.dataset_id,
