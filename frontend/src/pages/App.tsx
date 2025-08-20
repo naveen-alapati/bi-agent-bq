@@ -535,28 +535,7 @@ export default function App() {
           <div className="section-title">
             Dashboard {version && <span className="chip" style={{ marginLeft: 8 }}>v{version}</span>}
             {kpiLoading && <span className="badge" style={{ marginLeft: 8, background: 'var(--accent)', color: '#fff' }}>Running KPIs...</span>}
-            {(() => {
-              // Use routeId to find the current dashboard instead of name/version matching
-              const current = dashList.find((d:any) => d.id === routeId)
-              if (current?.default_flag) {
-                return <span className="badge" style={{ marginLeft: 'auto', background: 'var(--primary)', color: '#fff' }}>Default Dashboard</span>
-              } else if (routeId) {
-                return <button className="btn btn-sm" style={{ marginLeft: 'auto', background: '#239BA7', color: '#fff', borderColor: '#239BA7' }} onClick={async () => {
-                  try {
-                    console.log('Setting dashboard as default:', { routeId, dashboardName, version })
-                    await api.setDefaultDashboard(routeId); 
-                    toast('success','Set as default dashboard')
-                    // Refresh dashboard list to update default flags
-                    await api.listDashboards().then(setDashList)
-                  } catch(e:any){ 
-                    console.error('Failed to set as default dashboard:', e)
-                    toast('error', e?.message||'Failed to set as default dashboard') 
-                  }
-                }}>Set as Default</button>
-              } else {
-                return <span className="badge" style={{ marginLeft: 'auto', background: 'var(--warn)', color: '#fff' }}>Save First</span>
-              }
-            })()}
+            {/* Default dashboard status is handled by TopBar component */}
           </div>
 
           <div className="tabs-bar">
