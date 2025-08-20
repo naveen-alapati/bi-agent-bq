@@ -53,16 +53,9 @@ export const api = {
     const r = await axios.post('/api/kpi/edit_chat', { kpi, message, history, context })
     return r.data as { reply: string; kpi?: any }
   },
-  async setDefaultDashboard(id: string) {
-    const r = await axios.post('/api/dashboards/default', { id })
-    return r.data
-  },
-  async clearDefaultDashboard() {
-    const r = await axios.delete('/api/dashboards/default')
-    return r.data
-  },
-  async getDefaultDashboard() {
-    const r = await axios.get('/api/dashboards/default')
+
+  async getMostRecentDashboard() {
+    const r = await axios.get('/api/dashboards/most-recent')
     return r.data.id as string | null
   },
   async cxoStart(dashboard_id: string, dashboard_name: string, active_tab: string) {

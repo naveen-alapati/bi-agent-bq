@@ -46,15 +46,15 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       try {
-        const def = await api.getDefaultDashboard()
-        if (def) {
-          loadDashboard(def)
+        const mostRecent = await api.getMostRecentDashboard()
+        if (mostRecent) {
+          loadDashboard(mostRecent)
         } else if (dashboards.length > 0) {
-          // If no default dashboard exists, load the first available one
+          // If no recent dashboard exists, load the first available one
           loadDashboard(dashboards[0].id)
         }
       } catch (error) {
-        console.error('Failed to load default dashboard:', error)
+        console.error('Failed to load most recent dashboard:', error)
         // Fallback to first dashboard if available
         if (dashboards.length > 0) {
           loadDashboard(dashboards[0].id)

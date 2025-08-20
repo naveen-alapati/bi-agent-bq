@@ -176,13 +176,12 @@ export default function App() {
     setDirty(true)
   }
 
-  async function saveDashboard(asNew?: boolean) {
+  async function saveDashboard() {
     setSaving(true)
     try {
       const payload = {
-        id: asNew ? undefined : undefined,
+        id: routeId, // Always pass the current ID if it exists
         name: dashboardName,
-        version: asNew ? '1.0.0' : undefined,
         kpis,
         layout: layouts,
         layouts: undefined,
@@ -195,6 +194,7 @@ export default function App() {
       }
       const res = await api.saveDashboard(payload as any)
       setVersion(res.version)
+      setRouteId(res.id) // Update the route ID with the new one
       await api.listDashboards().then(setDashList)
       toast('success', `Saved ${res.name} v${res.version}`)
       setDirty(false)
@@ -218,20 +218,7 @@ export default function App() {
       })
   }
 
-  async function setAsDefaultDashboard() {
-    try {
-      if (!routeId) {
-        toast('error', 'Save the dashboard first before setting as default')
-        return
-      }
-      await api.setDefaultDashboard(routeId)
-      toast('success', `"${dashboardName}" set as default dashboard`)
-      // Refresh dashboard list to update default flags
-      await api.listDashboards().then(setDashList)
-    } catch (error) {
-      toast('error', 'Failed to set as default dashboard')
-    }
-  }
+
 
   async function deleteDashboard() {
     if (!routeId) {
@@ -395,8 +382,7 @@ export default function App() {
         name={dashboardName}
         version={version}
         onNameChange={(v) => { setDashboardName(v); setDirty(true) }}
-        onSave={() => saveDashboard(false)}
-        onSaveAs={() => saveDashboard(true)}
+        onSave={() => saveDashboard()}
         globalDate={globalDate}
         onGlobalDateChange={(v) => { setGlobalDate(v); setDirty(true) }}
         theme={theme}
@@ -406,8 +392,6 @@ export default function App() {
         sidebarOpen={sidebarOpen}
         dirty={dirty}
         dashboardId={routeId}
-        isDefault={dashList.find(d => d.id === routeId)?.default_flag}
-        onSetAsDefault={setAsDefaultDashboard}
         onDeleteDashboard={deleteDashboard}
       />
 
@@ -537,7 +521,7 @@ export default function App() {
           <div className="section-title">
             Dashboard {version && <span className="chip" style={{ marginLeft: 8 }}>v{version}</span>}
             {kpiLoading && <span className="badge" style={{ marginLeft: 8, background: 'var(--accent)', color: '#fff' }}>Running KPIs...</span>}
-            {/* Default dashboard status is handled by TopBar component */}
+    
           </div>
 
           <div className="tabs-bar">

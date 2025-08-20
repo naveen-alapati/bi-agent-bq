@@ -416,6 +416,27 @@ class BigQueryService:
         rows = list(self.client.query(sql, location=self.location))
         return rows[0]["id"] if rows else None
 
+    def get_most_recent_dashboard(self, dataset_id: str = "analytics_dash") -> Optional[str]:
+        table = self.ensure_dashboards_table(dataset_id)
+        # Get the most recently created dashboard
+        sql = f"""
+        WITH LatestVersions AS (
+            SELECT 
+                id, name, version, created_at, updated_at,
+                ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) as rn
+            FROM `{table}`
+        )
+        SELECT id 
+        FROM LatestVersions 
+        WHERE rn = 1 
+        ORDER BY created_at DESC 
+        LIMIT 1
+        """
+        rows = list(self.client.query(sql, location=self.location))
+        if rows:
+            return dict(rows[0])['id']
+        return None
+
     def _next_patch(self, current: Optional[str]) -> str:
         if not current:
             return "1.0.0"
@@ -427,34 +448,45 @@ class BigQueryService:
 
     def save_dashboard(self, name: str, kpis: List[Dict[str, Any]], layout: Optional[List[Dict[str, Any]]], layouts: Optional[Dict[str, List[Dict[str, Any]]]], selected_tables: List[Dict[str, Any]], global_filters: Optional[Dict[str, Any]], theme: Optional[Dict[str, Any]], version: Optional[str] = None, dashboard_id: Optional[str] = None, dataset_id: str = "analytics_dash", tabs: Optional[List[Dict[str, Any]]] = None, tab_layouts: Optional[Dict[str, List[Dict[str, Any]]]] = None, last_active_tab: Optional[str] = None) -> Tuple[str, str]:
         table = self.ensure_dashboards_table(dataset_id)
-        did = dashboard_id or uuid.uuid4().hex
         now = datetime.now(timezone.utc)
-        # determine next version if not provided: find latest for same name
-        ver = version
-        if not ver:
+        
+        # Check if this is an existing dashboard with the same name
+        existing_dashboard = None
+        if dashboard_id:
             try:
                 rows = list(self.client.query(
-                    f"SELECT version FROM `{table}` WHERE name=@n ORDER BY updated_at DESC LIMIT 1",
-                    job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("n","STRING", name)]),
+                    f"SELECT name FROM `{table}` WHERE id=@id ORDER BY updated_at DESC LIMIT 1",
+                    job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id","STRING", dashboard_id)]),
+                    location=self.location,
+                ))
+                if rows:
+                    existing_dashboard = dict(rows[0])
+            except Exception:
+                pass
+        
+        # If name changed, treat as new dashboard
+        if existing_dashboard and existing_dashboard.get('name') != name:
+            dashboard_id = None  # Reset ID to create new dashboard
+        
+        # Generate new ID if creating new dashboard
+        did = dashboard_id or uuid.uuid4().hex
+        
+        # Determine version - always create new version for existing dashboard
+        if dashboard_id and existing_dashboard:
+            try:
+                rows = list(self.client.query(
+                    f"SELECT version FROM `{table}` WHERE id=@id ORDER BY updated_at DESC LIMIT 1",
+                    job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id","STRING", dashboard_id)]),
                     location=self.location,
                 ))
                 latest = dict(rows[0])['version'] if rows else None
                 ver = self._next_patch(latest)
             except Exception:
                 ver = "1.0.0"
-        # Delete existing by id (Save) or same name+version (rare collision)
-        try:
-            self.client.query(
-                f"DELETE FROM `{table}` WHERE id=@id OR (name=@n AND version=@v)",
-                job_config=bigquery.QueryJobConfig(query_parameters=[
-                    bigquery.ScalarQueryParameter("id","STRING", did),
-                    bigquery.ScalarQueryParameter("n","STRING", name),
-                    bigquery.ScalarQueryParameter("v","STRING", ver),
-                ]),
-                location=self.location,
-            ).result()
-        except Exception:
-            pass
+        else:
+            ver = "1.0.0"
+        
+        # Create new record (don't update existing)
         row = {
             "id": did,
             "name": name,
@@ -465,7 +497,6 @@ class BigQueryService:
             "selected_tables": json.dumps(selected_tables),
             "global_filters": json.dumps(global_filters or {}),
             "theme": json.dumps(theme or {}),
-            "default_flag": False,  # Set default to FALSE for new dashboards
             "tabs": json.dumps(tabs or []),
             "tab_layouts": json.dumps(tab_layouts or {}),
             "last_active_tab": (last_active_tab or "overview"),
@@ -480,13 +511,32 @@ class BigQueryService:
 
     def list_dashboards(self, dataset_id: str = "analytics_dash") -> List[Dict[str, Any]]:
         table = self.ensure_dashboards_table(dataset_id)
-        sql = f"SELECT id, name, version, default_flag, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at FROM `{table}` ORDER BY name, updated_at DESC"
+        # Return only the latest version of each dashboard, ordered by most recently created
+        sql = f"""
+        WITH LatestVersions AS (
+            SELECT 
+                id, name, version, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at,
+                ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) as rn
+            FROM `{table}`
+        )
+        SELECT id, name, version, created_at, updated_at
+        FROM LatestVersions 
+        WHERE rn = 1 
+        ORDER BY created_at DESC
+        """
         rows = [dict(r) for r in self.client.query(sql, location=self.location)]
         return rows
 
     def get_dashboard(self, dashboard_id: str, dataset_id: str = "analytics_dash") -> Optional[Dict[str, Any]]:
         table = self.ensure_dashboards_table(dataset_id)
-        sql = f"SELECT id, name, version, kpis, layout, layouts, selected_tables, global_filters, theme, default_flag, tabs, tab_layouts, last_active_tab, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at FROM `{table}` WHERE id=@id LIMIT 1"
+        # Always get the latest version of the dashboard
+        sql = f"""
+        SELECT id, name, version, kpis, layout, layouts, selected_tables, global_filters, theme, tabs, tab_layouts, last_active_tab, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at 
+        FROM `{table}` 
+        WHERE id=@id 
+        ORDER BY updated_at DESC 
+        LIMIT 1
+        """
         job = self.client.query(
             sql,
             job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", dashboard_id)]),
@@ -511,7 +561,6 @@ class BigQueryService:
             "selected_tables": parse_json_field(row["selected_tables"]),
             "global_filters": parse_json_field(row.get("global_filters") or "{}"),
             "theme": parse_json_field(row.get("theme") or "{}"),
-            "default_flag": row.get("default_flag", False),
             "tabs": parse_json_field(row.get("tabs") or "[]"),
             "tab_layouts": parse_json_field(row.get("tab_layouts") or "{}"),
             "last_active_tab": row.get("last_active_tab") or "overview",

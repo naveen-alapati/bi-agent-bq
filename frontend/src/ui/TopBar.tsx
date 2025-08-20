@@ -5,7 +5,6 @@ export function TopBar({
   version,
   onNameChange,
   onSave,
-  onSaveAs,
   globalDate,
   onGlobalDateChange,
   theme,
@@ -15,15 +14,12 @@ export function TopBar({
   sidebarOpen,
   dirty,
   dashboardId,
-  isDefault,
-  onSetAsDefault,
   onDeleteDashboard,
 }: {
   name: string
   version?: string
   onNameChange: (v: string) => void
   onSave: () => void
-  onSaveAs: () => void
   globalDate: { from?: string; to?: string }
   onGlobalDateChange: (next: { from?: string; to?: string }) => void
   theme: 'light' | 'dark'
@@ -33,8 +29,6 @@ export function TopBar({
   sidebarOpen?: boolean
   dirty?: boolean
   dashboardId?: string
-  isDefault?: boolean
-  onSetAsDefault?: () => void
   onDeleteDashboard?: () => void
 }) {
   const [editing, setEditing] = useState(false)
@@ -65,20 +59,8 @@ export function TopBar({
         )}
         {version && <span className="badge">v{version}</span>}
         {dirty ? (
-          <>
-            <button className="btn btn-primary" onClick={onSave}>Save</button>
-            <button className="btn btn-ghost" onClick={onSaveAs}>Save As</button>
-          </>
+          <button className="btn btn-primary" onClick={onSave}>Save</button>
         ) : null}
-        {dashboardId && onSetAsDefault && (
-          isDefault ? (
-            <span className="badge" style={{ background: 'var(--primary)', color: '#fff' }}>Default</span>
-          ) : (
-            <button className="btn btn-sm" onClick={onSetAsDefault} style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}>
-              Set as Default
-            </button>
-          )
-        )}
         {dashboardId && onDeleteDashboard && (
           <button className="btn btn-sm" onClick={onDeleteDashboard} style={{ background: 'var(--warn)', color: '#fff', borderColor: 'var(--warn)' }}>
             Delete
