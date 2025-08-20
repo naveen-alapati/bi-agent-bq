@@ -40,27 +40,28 @@ export default function Home() {
   const feedLayerRef = useRef<HTMLDivElement | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
 
-  useEffect(() => { api.listDashboards().then((rows) => {
-    // dedupe by name, keep latest updated_at
-    const byName: Record<string, any> = {}
-    for (const d of rows || []) {
-      const key = d.name
-      const prev = byName[key]
-      if (!prev) byName[key] = d
-      else {
-        const prevTs = Date.parse(prev.updated_at || prev.created_at || '0')
-        const curTs = Date.parse(d.updated_at || d.created_at || '0')
-        if (curTs >= prevTs) byName[key] = d
-      }
-    }
-    setDashboards(Object.values(byName))
-  }).catch(() => {}) }, [])
+  useEffect(() => { 
+    refreshDashboardList()
+  }, [])
   useEffect(() => {
     (async () => {
-      const def = await api.getDefaultDashboard().catch(() => null)
-      if (def) loadDashboard(def)
+      try {
+        const def = await api.getDefaultDashboard()
+        if (def) {
+          loadDashboard(def)
+        } else if (dashboards.length > 0) {
+          // If no default dashboard exists, load the first available one
+          loadDashboard(dashboards[0].id)
+        }
+      } catch (error) {
+        console.error('Failed to load default dashboard:', error)
+        // Fallback to first dashboard if available
+        if (dashboards.length > 0) {
+          loadDashboard(dashboards[0].id)
+        }
+      }
     })()
-  }, [])
+  }, [dashboards])
 
   useEffect(() => {
     const el = gridWrapRef.current
@@ -97,6 +98,26 @@ export default function Home() {
       await runKpiWithFilters(k)
     }
     toast('success', 'Dashboard refreshed')
+  }
+
+  async function refreshDashboardList() {
+    try {
+      const rows = await api.listDashboards()
+      const byName: Record<string, any> = {}
+      for (const d of rows || []) {
+        const key = d.name
+        const prev = byName[key]
+        if (!prev) byName[key] = d
+        else {
+          const prevTs = Date.parse(prev.updated_at || prev.created_at || '0')
+          const curTs = Date.parse(d.updated_at || d.created_at || '0')
+          if (curTs >= prevTs) byName[key] = d
+        }
+      }
+      setDashboards(Object.values(byName))
+    } catch (error) {
+      console.error('Failed to refresh dashboard list:', error)
+    }
   }
 
   function animateBezier(node: HTMLElement, sx: number, sy: number, dx: number, dy: number, durationMs: number, delayMs: number, curveOffset = 120) {
@@ -544,13 +565,92 @@ export default function Home() {
               <div className="section-title">All Dashboards</div>
               <div className="scroll">
                 {dashboards.map(d => (
-                  <button key={d.id} className="btn" onClick={() => loadDashboard(d.id)} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, background: d.id === active?.id ? 'linear-gradient(90deg, rgba(35,155,167,0.25), rgba(122,218,165,0.25))' : 'linear-gradient(90deg, var(--surface), rgba(122,218,165,0.2))', borderColor: d.id === active?.id ? 'var(--primary)' : undefined }}>
-                    <span style={{ textAlign: 'left' }}>
-                      <div className="card-title">{d.name}</div>
-                      <div className="card-subtitle">v{d.version}</div>
-                    </span>
-                    {d.id === active?.id ? <span className="chip">Selected</span> : <span className="chip">View</span>}
-                  </button>
+                  <div key={d.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 6 }}>
+                    <button className="btn" onClick={() => loadDashboard(d.id)} style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', background: d.id === active?.id ? 'linear-gradient(90deg, rgba(35,155,167,0.25), rgba(122,218,165,0.25))' : 'linear-gradient(90deg, var(--surface), rgba(122,218,165,0.2))', borderColor: d.id === active?.id ? 'var(--primary)' : undefined }}>
+                      <span style={{ textAlign: 'left' }}>
+                        <div className="card-title">{d.name}</div>
+                        <div className="card-subtitle">v{d.version}</div>
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {d.default_flag && <span className="chip" style={{ background: 'var(--primary)', color: '#fff', fontSize: '10px' }}>Default</span>}
+                        {d.id === active?.id ? <span className="chip">Selected</span> : <span className="chip">View</span>}
+                      </div>
+                    </button>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {d.default_flag ? (
+                        <button 
+                          className="btn btn-sm" 
+                          onClick={async () => {
+                            try {
+                              await api.clearDefaultDashboard()
+                              toast('success', 'Default dashboard cleared')
+                              await refreshDashboardList()
+                            } catch (error) {
+                              toast('error', 'Failed to clear default')
+                            }
+                          }}
+                          style={{ 
+                            background: 'var(--warn)', 
+                            color: '#fff',
+                            borderColor: 'var(--warn)',
+                            fontSize: '11px',
+                            padding: '4px 8px'
+                          }}
+                        >
+                          Clear Default
+                        </button>
+                      ) : (
+                        <button 
+                          className="btn btn-sm" 
+                          onClick={async () => {
+                            try {
+                              await api.setDefaultDashboard(d.id)
+                              toast('success', `"${d.name}" set as default`)
+                              await refreshDashboardList()
+                            } catch (error) {
+                              toast('error', 'Failed to set as default')
+                            }
+                          }}
+                          style={{ 
+                            background: 'var(--primary)', 
+                            color: '#fff',
+                            borderColor: 'var(--primary)',
+                            fontSize: '11px',
+                            padding: '4px 8px'
+                          }}
+                        >
+                          Set Default
+                        </button>
+                      )}
+                      <button 
+                        className="btn btn-sm" 
+                        onClick={async () => {
+                          if (window.confirm(`Are you sure you want to delete "${d.name}"? This action cannot be undone.`)) {
+                            try {
+                              await api.deleteDashboard(d.id)
+                              toast('success', 'Dashboard deleted')
+                              if (d.id === active?.id) {
+                                setActive(null)
+                                setActiveId('')
+                              }
+                              await refreshDashboardList()
+                            } catch (error) {
+                              toast('error', 'Failed to delete dashboard')
+                            }
+                          }
+                        }}
+                        style={{ 
+                          background: 'var(--warn)', 
+                          color: '#fff',
+                          borderColor: 'var(--warn)',
+                          fontSize: '11px',
+                          padding: '4px 8px'
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -580,6 +680,70 @@ export default function Home() {
                 </div>
                 <div className="toolbar" style={{ marginLeft: 'auto' }}>
                   <button className="btn" onClick={() => refreshAll()}>Refresh</button>
+                  {active.default_flag ? (
+                    <button 
+                      className="btn" 
+                      onClick={async () => {
+                        try {
+                          await api.clearDefaultDashboard()
+                          toast('success', 'Default dashboard cleared')
+                          await refreshDashboardList()
+                        } catch (error) {
+                          toast('error', 'Failed to clear default')
+                        }
+                      }}
+                      style={{ 
+                        background: 'var(--warn)', 
+                        color: '#fff',
+                        borderColor: 'var(--warn)'
+                      }}
+                    >
+                      Clear Default
+                    </button>
+                  ) : (
+                    <button 
+                      className="btn" 
+                      onClick={async () => {
+                        try {
+                          await api.setDefaultDashboard(active.id)
+                          toast('success', 'Set as default dashboard')
+                          await refreshDashboardList()
+                        } catch (error) {
+                          toast('error', 'Failed to set as default')
+                        }
+                      }}
+                      style={{ 
+                        background: 'var(--surface)', 
+                        color: 'var(--text)',
+                        borderColor: 'var(--border)'
+                      }}
+                    >
+                      Set as Default
+                    </button>
+                  )}
+                  <button 
+                    className="btn" 
+                    onClick={async () => {
+                      if (window.confirm(`Are you sure you want to delete "${active.name}"? This action cannot be undone.`)) {
+                        try {
+                          await api.deleteDashboard(active.id)
+                          toast('success', 'Dashboard deleted')
+                          setActive(null)
+                          setActiveId('')
+                          await refreshDashboardList()
+                        } catch (error) {
+                          toast('error', 'Failed to delete dashboard')
+                        }
+                      }
+                    }}
+                    style={{ 
+                      background: 'var(--warn)', 
+                      color: '#fff',
+                      borderColor: 'var(--warn)'
+                    }}
+                  >
+                    Delete
+                  </button>
                 </div>
               </div>
 

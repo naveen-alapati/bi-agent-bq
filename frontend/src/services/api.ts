@@ -33,6 +33,10 @@ export const api = {
     const r = await axios.get(`/api/dashboards/${encodeURIComponent(id)}`)
     return r.data
   },
+  async deleteDashboard(id: string) {
+    const r = await axios.delete(`/api/dashboards/${encodeURIComponent(id)}`)
+    return r.data
+  },
   async addToKpiCatalog(datasetId: string, tableId: string, kpis: any[]) {
     const r = await axios.post('/api/kpi_catalog', { datasetId, tableId, kpis })
     return r.data
@@ -51,6 +55,10 @@ export const api = {
   },
   async setDefaultDashboard(id: string) {
     const r = await axios.post('/api/dashboards/default', { id })
+    return r.data
+  },
+  async clearDefaultDashboard() {
+    const r = await axios.delete('/api/dashboards/default')
     return r.data
   },
   async getDefaultDashboard() {
