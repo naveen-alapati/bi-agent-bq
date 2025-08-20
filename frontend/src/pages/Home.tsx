@@ -18,10 +18,10 @@ export default function Home() {
   const [rowsByKpi, setRowsByKpi] = useState<Record<string, any[]>>({})
   const [localFilters, setLocalFilters] = useState<{ from?: string; to?: string; category?: { column?: string; value?: string } }>({})
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true)
-  const [toasts, setToasts] = useState<{ id: number; type: 'success'|'error'; msg: string }[]>([])
-  const toast = (type: 'success'|'error', msg: string) => {
+  const [toasts, setToasts] = useState<{ id: number; type: 'success'|'error'|'info'; msg: string; title?: string }[]>([])
+  const toast = (type: 'success'|'error'|'info', msg: string, title?: string) => {
     const id = Date.now() + Math.random()
-    setToasts(t => [...t, { id, type, msg }])
+    setToasts(t => [...t, { id, type, msg, title }])
     setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 4500)
   }
   const gridWrapRef = useRef<HTMLDivElement | null>(null)
@@ -41,9 +41,30 @@ export default function Home() {
   const [exportOpen, setExportOpen] = useState(false)
   const exportDropdownRef = useRef<HTMLDivElement>(null)
 
+  // Initial dashboard loading - only run once
   useEffect(() => { 
-    refreshDashboardList()
-  }, [])
+    (async () => {
+      try {
+        // First, fetch the dashboard list
+        await refreshDashboardList()
+        
+        // Then, try to load the most recent dashboard
+        const mostRecent = await api.getMostRecentDashboard()
+        if (mostRecent) {
+          loadDashboard(mostRecent, false) // Don't show refresh toast on initial load
+        } else if (dashboards.length > 0) {
+          // If no recent dashboard exists, load the first available one
+          loadDashboard(dashboards[0].id, false) // Don't show refresh toast on initial load
+        }
+      } catch (error) {
+        console.error('Failed to load most recent dashboard:', error)
+        // Fallback to first dashboard if available
+        if (dashboards.length > 0) {
+          loadDashboard(dashboards[0].id, false) // Don't show refresh toast on initial load
+        }
+      }
+    })()
+  }, []) // Only run once on mount
 
   // Close export dropdown when clicking outside
   useEffect(() => {
@@ -61,25 +82,6 @@ export default function Home() {
       document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [exportOpen])
-  useEffect(() => {
-    (async () => {
-      try {
-        const mostRecent = await api.getMostRecentDashboard()
-        if (mostRecent) {
-          loadDashboard(mostRecent)
-        } else if (dashboards.length > 0) {
-          // If no recent dashboard exists, load the first available one
-          loadDashboard(dashboards[0].id)
-        }
-      } catch (error) {
-        console.error('Failed to load most recent dashboard:', error)
-        // Fallback to first dashboard if available
-        if (dashboards.length > 0) {
-          loadDashboard(dashboards[0].id)
-        }
-      }
-    })()
-  }, [dashboards])
 
   useEffect(() => {
     const el = gridWrapRef.current
@@ -90,7 +92,7 @@ export default function Home() {
     return () => ro.disconnect()
   }, [gridWrapRef.current])
 
-  async function loadDashboard(id: string) {
+  async function loadDashboard(id: string, showRefreshToast: boolean = true) {
     setActiveId(id)
     const d = await api.getDashboard(id)
     setActive(d)
@@ -98,24 +100,56 @@ export default function Home() {
     setTabs((d.tabs && d.tabs.length ? d.tabs : [{ id: 'overview', name: 'Overview', order: 0 }]))
     setActiveTab(d.last_active_tab || 'overview')
     if (d.global_filters && d.global_filters.date) { setLocalFilters({ from: d.global_filters.date.from, to: d.global_filters.date.to }) } else { setLocalFilters({}) }
-    setTimeout(() => refreshAll(d), 0)
+    
+    if (showRefreshToast) {
+      setTimeout(() => refreshAll(d), 0)
+    } else {
+      // Just run KPIs without showing toast for initial load
+      setTimeout(async () => {
+        const dash = d
+        if (!dash) return
+        for (const k of dash.kpis || []) {
+          await runKpiWithFilters(k, false) // No toast for initial load
+        }
+      }, 0)
+    }
   }
 
-  async function runKpiWithFilters(kpi: any) {
+  async function runKpiWithFilters(kpi: any, showToast: boolean = false) {
     const filters: any = {}
     if (localFilters.from || localFilters.to) filters.date = { from: localFilters.from, to: localFilters.to }
     if (localFilters.category && localFilters.category.column && localFilters.category.value) filters.category = localFilters.category
-    const res = await api.runKpi(kpi.sql, filters, kpi.filter_date_column, kpi.expected_schema)
-    setRowsByKpi(prev => ({ ...prev, [kpi.id]: res }))
+    
+    try {
+      const res = await api.runKpi(kpi.sql, filters, kpi.filter_date_column, kpi.expected_schema)
+      setRowsByKpi(prev => ({ ...prev, [kpi.id]: res }))
+      
+      if (showToast) {
+        toast('success', `${kpi.name} updated`, 'KPI Refresh')
+      }
+    } catch (error) {
+      console.error(`Failed to run KPI ${kpi.name}:`, error)
+      if (showToast) {
+        toast('error', `Failed to update ${kpi.name}`, 'KPI Error')
+      }
+    }
   }
 
   async function refreshAll(d?: any) {
     const dash = d || active
     if (!dash) return
-    for (const k of dash.kpis || []) {
-      await runKpiWithFilters(k)
-    }
-    toast('success', 'Dashboard refreshed')
+    
+    toast('info', `Refreshing ${dash.name}...`, 'Dashboard Update')
+    
+          try {
+        for (const k of dash.kpis || []) {
+          await runKpiWithFilters(k, false) // No individual KPI toasts during bulk refresh
+        }
+        toast('success', `${dash.name} refreshed successfully`, 'Dashboard Updated')
+      } catch (error) {
+        console.error('Failed to refresh dashboard:', error)
+        toast('error', `Failed to refresh ${dash.name}`, 'Refresh Error')
+      }
   }
 
   async function refreshDashboardList() {
@@ -609,7 +643,35 @@ export default function Home() {
   return (
     <div>
       <div className="toast-container">
-        {toasts.map(t => (<div key={t.id} className={`toast ${t.type==='success'?'toast-success':'toast-error'}`}>{t.msg}</div>))}
+        {toasts.map(t => (
+          <div key={t.id} className={`toast toast-${t.type}`} style={{
+            background: t.type === 'success' ? '#10b981' : 
+                        t.type === 'error' ? '#ef4444' : 
+                        '#3b82f6',
+            color: '#ffffff',
+            padding: '12px 16px',
+            borderRadius: '8px',
+            marginBottom: '8px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            border: 'none',
+            fontSize: '14px',
+            fontWeight: '500',
+            maxWidth: '400px',
+            wordWrap: 'break-word'
+          }}>
+            {t.title && (
+              <div style={{ 
+                fontWeight: '600', 
+                marginBottom: '4px', 
+                fontSize: '12px',
+                opacity: '0.9'
+              }}>
+                {t.title}
+              </div>
+            )}
+            <div>{t.msg}</div>
+          </div>
+        ))}
       </div>
       <div className="topbar header-gradient" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', position: 'sticky', top: 0, zIndex: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -822,7 +884,7 @@ export default function Home() {
                         <div className="card-subtitle">{k.short_description}</div>
                       </div>
                       <div className="card-actions">
-                        <button className="btn btn-sm" onClick={() => runKpiWithFilters(k)}>Refresh</button>
+                        <button className="btn btn-sm" onClick={() => runKpiWithFilters(k, true)}>Refresh</button>
                       </div>
                     </div>
                     <div style={{ flex: 1, padding: 8 }} className="no-drag"><ChartRenderer chart={k} rows={rowsByKpi[k.id] || []} /></div>
