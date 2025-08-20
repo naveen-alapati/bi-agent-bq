@@ -78,14 +78,9 @@ export function TableSelector({ datasets, onChange }: Props) {
           onChange={e => setActiveDataset(e.target.value)}
           disabled={!datasets.length}
         >
-          {datasets
-            .filter(ds => !ds.isBackendCreated) // Filter out backend-created datasets
-            .map(ds => (
-              <option key={ds.datasetId} value={ds.datasetId}>
-                {ds.datasetId}
-                {ds.isBackendCreated && <span style={{ color: '#999', fontStyle: 'italic' }}> (Backend)</span>}
-              </option>
-            ))}
+          {datasets.map(ds => (
+            <option key={ds.datasetId} value={ds.datasetId}>{ds.datasetId}</option>
+          ))}
         </select>
       </div>
 
