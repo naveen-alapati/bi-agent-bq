@@ -225,36 +225,7 @@ def edit_kpi_chat(payload: Dict[str, Any]):
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
-@app.post("/api/dashboards/default")
-def set_default_dashboard(payload: Dict[str, str]):
-	try:
-		did = payload.get('id')
-		if not did:
-			raise HTTPException(status_code=400, detail="Dashboard ID is required")
-		
-		# Validate dashboard ID format
-		if not isinstance(did, str) or len(did.strip()) == 0:
-			raise HTTPException(status_code=400, detail="Invalid dashboard ID format")
-		
-		bq_service.set_default_dashboard(did.strip(), dataset_id=DASH_DATASET)
-		return {"status": "ok", "message": f"Dashboard {did} set as default successfully"}
-	except HTTPException:
-		raise
-	except ValueError as ve:
-		# Handle validation errors from the service layer
-		raise HTTPException(status_code=404, detail=str(ve))
-	except Exception as exc:
-		# Log the full error for debugging
-		print(f"Error setting default dashboard: {exc}")
-		raise HTTPException(status_code=500, detail=f"Failed to set default dashboard: {str(exc)}")
 
-@app.delete("/api/dashboards/default")
-def clear_default_dashboards():
-	try:
-		bq_service.clear_default_dashboards(dataset_id=DASH_DATASET)
-		return {"status": "ok"}
-	except Exception as exc:
-		raise HTTPException(status_code=500, detail=str(exc))
 
 @app.delete("/api/dashboards/{dashboard_id}")
 def delete_dashboard(dashboard_id: str):
@@ -264,10 +235,10 @@ def delete_dashboard(dashboard_id: str):
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
-@app.get("/api/dashboards/default")
-def get_default_dashboard():
+@app.get("/api/dashboards/most-recent")
+def get_most_recent_dashboard():
 	try:
-		did = bq_service.get_default_dashboard(dataset_id=DASH_DATASET)
+		did = bq_service.get_most_recent_dashboard(dataset_id=DASH_DATASET)
 		return {"id": did}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
