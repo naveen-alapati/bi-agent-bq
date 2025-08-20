@@ -76,11 +76,15 @@ export default function App() {
   useEffect(() => {
     setLoadError('')
     api.getDatasets().then(setDatasets).catch(() => setLoadError('Failed to fetch datasets. Ensure the Cloud Run service account has BigQuery list permissions.'))
-    api.listDashboards().then(setDashList).catch(() => {})
+    api.listDashboards().then(dashboards => {
+      console.log('Loaded dashboards:', dashboards)
+      setDashList(dashboards)
+    }).catch(() => {})
   }, [])
 
   useEffect(() => {
     if (!routeId) return
+    console.log('Loading dashboard with routeId:', routeId)
     api.getDashboard(routeId).then(async d => {
       setDashboardName(d.name)
       setVersion(d.version || '')
@@ -532,22 +536,25 @@ export default function App() {
             Dashboard {version && <span className="chip" style={{ marginLeft: 8 }}>v{version}</span>}
             {kpiLoading && <span className="badge" style={{ marginLeft: 8, background: 'var(--accent)', color: '#fff' }}>Running KPIs...</span>}
             {(() => {
-              const current = dashList.find((d:any) => d.name === dashboardName && d.version === version)
+              // Use routeId to find the current dashboard instead of name/version matching
+              const current = dashList.find((d:any) => d.id === routeId)
               if (current?.default_flag) {
                 return <span className="badge" style={{ marginLeft: 'auto', background: 'var(--primary)', color: '#fff' }}>Default Dashboard</span>
-              } else {
+              } else if (routeId) {
                 return <button className="btn btn-sm" style={{ marginLeft: 'auto', background: '#239BA7', color: '#fff', borderColor: '#239BA7' }} onClick={async () => {
                   try {
-                    if (current?.id) { 
-                      await api.setDefaultDashboard(current.id); 
-                      toast('success','Set as default dashboard')
-                      // Refresh dashboard list to update default flags
-                      await api.listDashboards().then(setDashList)
-                    } else { 
-                      toast('error','Save first') 
-                    }
-                  } catch(e:any){ toast('error', e?.message||'Failed') }
+                    console.log('Setting dashboard as default:', { routeId, dashboardName, version })
+                    await api.setDefaultDashboard(routeId); 
+                    toast('success','Set as default dashboard')
+                    // Refresh dashboard list to update default flags
+                    await api.listDashboards().then(setDashList)
+                  } catch(e:any){ 
+                    console.error('Failed to set as default dashboard:', e)
+                    toast('error', e?.message||'Failed to set as default dashboard') 
+                  }
                 }}>Set as Default</button>
+              } else {
+                return <span className="badge" style={{ marginLeft: 'auto', background: 'var(--warn)', color: '#fff' }}>Save First</span>
               }
             })()}
           </div>

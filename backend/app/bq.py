@@ -312,6 +312,14 @@ class BigQueryService:
 
     def set_default_dashboard(self, dashboard_id: str, dataset_id: str = "analytics_dash") -> None:
         table = self.ensure_dashboards_table(dataset_id)
+        
+        # First, validate that the dashboard exists
+        sql = f"SELECT id FROM `{table}` WHERE id = @id LIMIT 1"
+        job = self.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id","STRING", dashboard_id)]), location=self.location)
+        rows = list(job)
+        if not rows:
+            raise ValueError(f"Dashboard with ID '{dashboard_id}' not found")
+        
         # Clear previous default and set new one
         # Use IS NOT DISTINCT FROM to handle NULL values properly
         sql = f"""
