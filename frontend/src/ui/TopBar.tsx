@@ -14,6 +14,10 @@ export function TopBar({
   onToggleSidebar,
   sidebarOpen,
   dirty,
+  dashboardId,
+  isDefault,
+  onSetAsDefault,
+  onDeleteDashboard,
 }: {
   name: string
   version?: string
@@ -28,6 +32,10 @@ export function TopBar({
   onToggleSidebar?: () => void
   sidebarOpen?: boolean
   dirty?: boolean
+  dashboardId?: string
+  isDefault?: boolean
+  onSetAsDefault?: () => void
+  onDeleteDashboard?: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(name)
@@ -62,6 +70,20 @@ export function TopBar({
             <button className="btn btn-ghost" onClick={onSaveAs}>Save As</button>
           </>
         ) : null}
+        {dashboardId && onSetAsDefault && (
+          isDefault ? (
+            <span className="badge" style={{ background: 'var(--primary)', color: '#fff' }}>Default</span>
+          ) : (
+            <button className="btn btn-sm" onClick={onSetAsDefault} style={{ background: 'var(--primary)', color: '#fff', borderColor: 'var(--primary)' }}>
+              Set as Default
+            </button>
+          )
+        )}
+        {dashboardId && onDeleteDashboard && (
+          <button className="btn btn-sm" onClick={onDeleteDashboard} style={{ background: 'var(--warn)', color: '#fff', borderColor: 'var(--warn)' }}>
+            Delete
+          </button>
+        )}
       </div>
       <div className="toolbar" style={{ alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

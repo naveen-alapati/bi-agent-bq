@@ -189,6 +189,39 @@ export default function App() {
       })
   }
 
+  async function setAsDefaultDashboard() {
+    try {
+      if (!routeId) {
+        toast('error', 'Save the dashboard first before setting as default')
+        return
+      }
+      await api.setDefaultDashboard(routeId)
+      toast('success', `"${dashboardName}" set as default dashboard`)
+      // Refresh dashboard list to update default flags
+      await api.listDashboards().then(setDashList)
+    } catch (error) {
+      toast('error', 'Failed to set as default dashboard')
+    }
+  }
+
+  async function deleteDashboard() {
+    if (!routeId) {
+      toast('error', 'Cannot delete unsaved dashboard')
+      return
+    }
+    
+    if (window.confirm(`Are you sure you want to delete "${dashboardName}"? This action cannot be undone.`)) {
+      try {
+        await api.deleteDashboard(routeId)
+        toast('success', 'Dashboard deleted')
+        // Redirect to home page after deletion
+        window.location.href = '/'
+      } catch (error) {
+        toast('error', 'Failed to delete dashboard')
+      }
+    }
+  }
+
   function addKpiToCanvas(item: any) {
     const id = `${item.dataset_id}.${item.table_id}:${item.id}`
     const k: any = {
@@ -330,6 +363,10 @@ export default function App() {
         onToggleSidebar={() => setSidebarOpen(o => !o)}
         sidebarOpen={sidebarOpen}
         dirty={dirty}
+        dashboardId={routeId}
+        isDefault={dashList.find(d => d.id === routeId)?.default_flag}
+        onSetAsDefault={setAsDefaultDashboard}
+        onDeleteDashboard={deleteDashboard}
       />
 
       <div className={`app-grid ${!sidebarOpen ? 'app-grid--collapsed' : ''}`}>
