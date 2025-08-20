@@ -60,12 +60,23 @@ class BigQueryService:
 
     def list_datasets(self) -> List[Dict[str, Any]]:
         datasets = []
+        # List of datasets that are created by the backend app
+        backend_datasets = {
+            "analytics_dash",  # Dashboard storage
+            "embeddings",      # Vector embeddings
+            "kpi_catalog",     # KPI catalog storage
+            "analytics_cache", # Analytics cache
+            "temp_analytics"   # Temporary analytics
+        }
+        
         for ds in self.client.list_datasets(project=self.project_id):
+            is_backend_created = ds.dataset_id in backend_datasets
             datasets.append(
                 {
                     "datasetId": ds.dataset_id,
                     "friendlyName": None,
                     "description": None,
+                    "isBackendCreated": is_backend_created,
                 }
             )
         return datasets
