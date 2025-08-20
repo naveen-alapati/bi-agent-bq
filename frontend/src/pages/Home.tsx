@@ -39,10 +39,28 @@ export default function Home() {
   const [chatSize, setChatSize] = useState<{ w: number; h: number }>({ w: 520, h: 0 })
   const feedLayerRef = useRef<HTMLDivElement | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
+  const exportDropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { 
     refreshDashboardList()
   }, [])
+
+  // Close export dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(event.target as Node)) {
+        setExportOpen(false)
+      }
+    }
+
+    if (exportOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [exportOpen])
   useEffect(() => {
     (async () => {
       try {
@@ -492,12 +510,82 @@ export default function Home() {
         </div>
         <div className="toolbar">
           <button className="btn btn-accent" onClick={openCxo}>CXO AI Assist</button>
-          <div style={{ position: 'relative' }}>
-            <button className="btn" onClick={() => setExportOpen(o => !o)}>Export CXO Summary ▾</button>
+          <div style={{ position: 'relative' }} ref={exportDropdownRef}>
+            <button className="btn" onClick={() => {
+              const newState = !exportOpen
+              console.log('Export dropdown state:', newState)
+              setExportOpen(newState)
+            }} style={{ 
+              background: exportOpen ? 'var(--primary)' : undefined,
+              color: exportOpen ? '#fff' : undefined
+            }}>
+              Export CXO Summary {exportOpen ? '▴' : '▾'}
+            </button>
             {exportOpen && (
-              <div style={{ position: 'absolute', right: 0, top: '110%', background: 'var(--card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', borderRadius: 8, zIndex: 20 }}>
-                <button className="btn" onClick={() => { setExportOpen(false); exportCurrentDashboardPDF() }} style={{ display: 'block', width: '100%' }}>Current Dashboard (PDF)</button>
-                <button className="btn" onClick={() => { setExportOpen(false); exportAllDashboardsPDF() }} style={{ display: 'block', width: '100%' }}>All Dashboards (PDF)</button>
+              <div 
+                style={{ 
+                  position: 'absolute', 
+                  right: 0, 
+                  top: '110%', 
+                  background: '#ffffff', 
+                  border: '2px solid #e0e0e0', 
+                  boxShadow: '0 6px 20px rgba(0,0,0,0.2)', 
+                  borderRadius: 8, 
+                  zIndex: 1000,
+                  minWidth: '200px',
+                  overflow: 'hidden'
+                }}
+                onMouseEnter={() => console.log('Dropdown hovered')}
+              >
+                <button 
+                  className="btn" 
+                  onClick={() => { 
+                    console.log('Current Dashboard PDF clicked')
+                    setExportOpen(false); 
+                    exportCurrentDashboardPDF() 
+                  }} 
+                  style={{ 
+                    display: 'block', 
+                    width: '100%', 
+                    textAlign: 'left',
+                    padding: '12px 16px',
+                    border: 'none',
+                    borderBottom: '1px solid #f0f0f0',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    color: '#333',
+                    transition: 'background-color 0.2s ease'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = '#f5f5f5'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  Current Dashboard (PDF)
+                </button>
+                <button 
+                  className="btn" 
+                  onClick={() => { 
+                    console.log('All Dashboards PDF clicked')
+                    setExportOpen(false); 
+                    exportAllDashboardsPDF() 
+                  }} 
+                  style={{ 
+                    display: 'block', 
+                    width: '100%', 
+                    textAlign: 'left',
+                    padding: '12px 16px',
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    color: '#333',
+                    transition: 'background-color 0.2s ease'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = '#f5f5f5'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  All Dashboards (PDF)
+                </button>
               </div>
             )}
           </div>
