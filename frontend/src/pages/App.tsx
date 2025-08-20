@@ -55,6 +55,7 @@ export default function App() {
   const [aiChat, setAiChat] = useState<{ role: 'assistant'|'user'; text: string }[]>([])
   const [aiInput, setAiInput] = useState('')
   const [aiTyping, setAiTyping] = useState(false)
+  const [catalogRefreshKey, setCatalogRefreshKey] = useState(0)
 
   function applyPalette(p: { primary: string; accent: string; surface: string; warn: string }) {
     const r = document.documentElement
@@ -126,13 +127,23 @@ export default function App() {
     try {
       await api.prepare(selected, 5)
       const kpisResp = await api.generateKpis(selected, 5)
-      setKpis(kpisResp)
+      
+      // Add KPIs to catalog only - don't add to dashboard automatically
       for (const sel of selected) {
         const perTable = kpisResp.filter(k => (k.id || '').startsWith(`${sel.datasetId}.${sel.tableId}:`))
         if (perTable.length) {
           await api.addToKpiCatalog(sel.datasetId, sel.tableId, perTable)
         }
       }
+      
+      // Show success message and inform user to add KPIs from catalog
+      toast('success', `Generated ${kpisResp.length} KPIs and added to catalog. Use the KPI Catalog to add them to your dashboard.`)
+      
+      // Trigger a refresh of the KPI Catalog to show newly added KPIs
+      setCatalogRefreshKey(prev => prev + 1)
+    } catch (error) {
+      console.error('Failed to analyze tables:', error)
+      toast('error', 'Failed to analyze tables. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -413,7 +424,7 @@ export default function App() {
             </div>
             <div className="panel">
               <div className="section-title">KPI Catalog</div>
-              <KPICatalog onAdd={addKpiToCanvas} />
+              <KPICatalog key={catalogRefreshKey} onAdd={addKpiToCanvas} />
             </div>
             <div className="panel">
               <div className="section-title">Dashboards</div>
