@@ -60,12 +60,23 @@ class BigQueryService:
 
     def list_datasets(self) -> List[Dict[str, Any]]:
         datasets = []
+        # List of datasets that are created by the backend app
+        backend_datasets = {
+            "analytics_dash",  # Dashboard storage
+            "embeddings",      # Vector embeddings
+            "kpi_catalog",     # KPI catalog storage
+            "analytics_cache", # Analytics cache
+            "temp_analytics"   # Temporary analytics
+        }
+        
         for ds in self.client.list_datasets(project=self.project_id):
+            is_backend_created = ds.dataset_id in backend_datasets
             datasets.append(
                 {
                     "datasetId": ds.dataset_id,
                     "friendlyName": None,
                     "description": None,
+                    "isBackendCreated": is_backend_created,
                 }
             )
         return datasets
@@ -304,9 +315,18 @@ class BigQueryService:
             
             # Migrate existing NULL default_flags to FALSE
             self._migrate_null_default_flags(table_fqn)
+            
+            # Check if table has streaming enabled and disable it if needed
+            if table_obj.streaming_buffer:
+                print(f"Warning: Table {table_fqn} has streaming enabled. This may cause UPDATE/DELETE issues.")
+                # Note: Cannot disable streaming on existing tables, only on creation
+                # Optionally recreate the table without streaming (use with caution)
+                # self._recreate_table_without_streaming(table_fqn, dataset_id)
         except NotFound:
             schema = [bigquery.SchemaField(n, t) for (n, t) in required]
             table_obj = bigquery.Table(table_fqn, schema=schema)
+            # Disable streaming to allow UPDATE/DELETE operations
+            table_obj.streaming_buffer = None
             self.client.create_table(table_obj)
         return table_fqn
 
@@ -320,14 +340,78 @@ class BigQueryService:
         if not rows:
             raise ValueError(f"Dashboard with ID '{dashboard_id}' not found")
         
-        # Clear previous default and set new one
-        # Use IS NOT DISTINCT FROM to handle NULL values properly
-        sql = f"""
-        UPDATE `{table}` SET default_flag = FALSE WHERE default_flag IS NOT DISTINCT FROM TRUE;
-        UPDATE `{table}` SET default_flag = TRUE WHERE id = @id;
-        """
-        job = self.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id","STRING", dashboard_id)]), location=self.location)
-        list(job)
+        try:
+            # Try the standard UPDATE approach first
+            sql = f"""
+            UPDATE `{table}` SET default_flag = FALSE WHERE default_flag IS NOT DISTINCT FROM TRUE;
+            UPDATE `{table}` SET default_flag = TRUE WHERE id = @id;
+            """
+            job = self.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id","STRING", dashboard_id)]), location=self.location)
+            list(job)
+        except Exception as e:
+            if "streaming buffer" in str(e).lower():
+                # Fallback for streaming tables: use INSERT/REPLACE approach
+                print(f"Streaming table detected, using alternative approach for {dashboard_id}")
+                self._set_default_dashboard_streaming_safe(dashboard_id, dataset_id)
+            else:
+                raise e
+    
+    def _set_default_dashboard_streaming_safe(self, dashboard_id: str, dataset_id: str = "analytics_dash") -> None:
+        """Alternative method for setting default dashboard that works with streaming tables."""
+        table = self.ensure_dashboards_table(dataset_id)
+        
+        # Get all dashboards
+        sql = f"SELECT * FROM `{table}`"
+        job = self.client.query(sql, location=self.location)
+        all_dashboards = list(job)
+        
+        # Create new records with updated default flags
+        for dashboard in all_dashboards:
+            dashboard['default_flag'] = (dashboard['id'] == dashboard_id)
+            # Convert to proper format for insert
+            dashboard['created_at'] = dashboard.get('created_at') or 'CURRENT_TIMESTAMP()'
+            dashboard['updated_at'] = 'CURRENT_TIMESTAMP()'
+        
+        # Clear the table and reinsert (this works with streaming)
+        clear_sql = f"DELETE FROM `{table}`"
+        self.client.query(clear_sql, location=self.location).result()
+        
+        # Reinsert all dashboards with updated default flags
+        for dashboard in all_dashboards:
+            # Convert dashboard data to proper format for insert
+            columns = list(dashboard.keys())
+            values = [dashboard[col] for col in columns]
+            placeholders = [f"@{i}" for i in range(len(columns))]
+            
+            insert_sql = f"""
+            INSERT INTO `{table}` ({', '.join(columns)})
+            VALUES ({', '.join(placeholders)})
+            """
+            
+                            # Create parameters for the insert
+                params = [bigquery.ScalarQueryParameter(str(i), "STRING", str(val)) for i, val in enumerate(values)]
+                job_config = bigquery.QueryJobConfig(query_parameters=params)
+                self.client.query(insert_sql, job_config=job_config, location=self.location).result()
+    
+    def _recreate_table_without_streaming(self, table_fqn: str, dataset_id: str) -> None:
+        """Utility method to recreate a table without streaming (use with caution - will lose data)."""
+        print(f"Recreating table {table_fqn} without streaming...")
+        
+        # Get the current table schema
+        table_obj = self.client.get_table(table_fqn)
+        schema = table_obj.schema
+        
+        # Create a new table name
+        new_table_name = f"{table_fqn}_no_streaming"
+        
+        # Create new table without streaming
+        new_table = bigquery.Table(new_table_name, schema=schema)
+        new_table.streaming_buffer = None
+        self.client.create_table(new_table)
+        
+        print(f"New table created: {new_table_name}")
+        print(f"To complete migration, manually copy data and update references")
+        print(f"WARNING: This will require manual intervention to complete safely")
 
     def delete_dashboard(self, dashboard_id: str, dataset_id: str = "analytics_dash") -> None:
         """Delete a dashboard and ensure another becomes default if needed."""
