@@ -491,13 +491,25 @@ export default function App() {
 
         <div style={{ display: 'grid', gap: 12 }} ref={gridWrapRef}>
           <div className="section-title">Dashboard {version && <span className="chip" style={{ marginLeft: 8 }}>v{version}</span>}
-            <button className="btn btn-sm" style={{ marginLeft: 'auto', background: '#239BA7', color: '#fff', borderColor: '#239BA7' }} onClick={async () => {
-              try {
-                const list = await api.listDashboards()
-                const current = list.find((d:any) => d.name === dashboardName && d.version === version)
-                if (current?.id) { await api.setDefaultDashboard(current.id); toast('success','Set as default dashboard') } else { toast('error','Save first') }
-              } catch(e:any){ toast('error', e?.message||'Failed') }
-            }}>Default</button>
+            {(() => {
+              const current = dashList.find((d:any) => d.name === dashboardName && d.version === version)
+              if (current?.default_flag) {
+                return <span className="badge" style={{ marginLeft: 'auto', background: 'var(--primary)', color: '#fff' }}>Default Dashboard</span>
+              } else {
+                return <button className="btn btn-sm" style={{ marginLeft: 'auto', background: '#239BA7', color: '#fff', borderColor: '#239BA7' }} onClick={async () => {
+                  try {
+                    if (current?.id) { 
+                      await api.setDefaultDashboard(current.id); 
+                      toast('success','Set as default dashboard')
+                      // Refresh dashboard list to update default flags
+                      await api.listDashboards().then(setDashList)
+                    } else { 
+                      toast('error','Save first') 
+                    }
+                  } catch(e:any){ toast('error', e?.message||'Failed') }
+                }}>Set as Default</button>
+              }
+            })()}
           </div>
 
           <div className="tabs-bar">
