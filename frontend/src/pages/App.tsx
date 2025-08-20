@@ -124,7 +124,12 @@ export default function App() {
 
   useEffect(() => {
     setLoadError('')
-    api.getDatasets().then(setDatasets).catch(() => setLoadError('Failed to fetch datasets. Ensure the Cloud Run service account has BigQuery list permissions.'))
+    api.getDatasets().then(datasets => {
+      console.log('Loaded datasets:', datasets)
+      console.log('Backend-created datasets:', datasets.filter(ds => ds.isBackendCreated))
+      console.log('User datasets:', datasets.filter(ds => !ds.isBackendCreated))
+      setDatasets(datasets)
+    }).catch(() => setLoadError('Failed to fetch datasets. Ensure the Cloud Run service account has BigQuery list permissions.'))
     api.listDashboards().then(dashboards => {
       console.log('Loaded dashboards:', dashboards)
       setDashList(dashboards)
@@ -467,7 +472,12 @@ export default function App() {
               {datasets.length === 0 ? (
                 <div className="card-subtitle">No datasets found. Verify IAM and BigQuery project.</div>
               ) : (
-                <TableSelector datasets={datasets} onChange={setSelected} />
+                <>
+                  <div style={{ fontSize: '12px', color: '#666', marginBottom: 8, fontStyle: 'italic' }}>
+                    {datasets.filter(ds => !ds.isBackendCreated).length} of {datasets.length} datasets available
+                  </div>
+                  <TableSelector datasets={datasets} onChange={setSelected} />
+                </>
               )}
               <button className="btn btn-primary" onClick={onAnalyze} disabled={!selected.length || loading} style={{ marginTop: 8 }}>
                 {loading ? 'Analyzing...' : `Analyze (${selected.length})`}

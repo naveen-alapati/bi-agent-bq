@@ -83,10 +83,24 @@ export function TableSelector({ datasets, onChange }: Props) {
             .map(ds => (
               <option key={ds.datasetId} value={ds.datasetId}>
                 {ds.datasetId}
-                {ds.isBackendCreated && <span style={{ color: '#999', fontStyle: 'italic' }}> (Backend)</span>}
               </option>
             ))}
         </select>
+        {datasets.some(ds => ds.isBackendCreated) && (
+          <div style={{ fontSize: '12px', color: '#666', marginTop: 4, fontStyle: 'italic' }}>
+            {datasets.filter(ds => ds.isBackendCreated).length} backend datasets filtered out
+            <details style={{ marginTop: 4 }}>
+              <summary style={{ cursor: 'pointer', fontSize: '11px' }}>Show filtered datasets</summary>
+              <div style={{ marginTop: 4, fontSize: '11px' }}>
+                {datasets.filter(ds => ds.isBackendCreated).map(ds => (
+                  <div key={ds.datasetId} style={{ color: '#999', marginBottom: 2 }}>
+                    • {ds.datasetId}
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
+        )}
       </div>
 
       {error && <div className="badge" style={{ marginBottom: 8, borderColor: 'crimson', color: 'crimson', background: 'rgba(220,20,60,0.06)' }}>{error}</div>}
