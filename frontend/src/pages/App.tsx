@@ -22,6 +22,7 @@ export default function App() {
   const [kpis, setKpis] = useState<any[]>([])
   const [rowsByKpi, setRowsByKpi] = useState<Record<string, any[]>>({})
   const [loading, setLoading] = useState(false)
+  const [kpiLoading, setKpiLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [dashboardName, setDashboardName] = useState('ecom-v1')
   const [version, setVersion] = useState<string>('')
@@ -80,7 +81,7 @@ export default function App() {
 
   useEffect(() => {
     if (!routeId) return
-    api.getDashboard(routeId).then(d => {
+    api.getDashboard(routeId).then(async d => {
       setDashboardName(d.name)
       setVersion(d.version || '')
       setKpis(d.kpis.map((k:any) => ({ ...k, tabs: Array.isArray(k.tabs) && k.tabs.length ? k.tabs : ['overview'] })))
@@ -97,6 +98,12 @@ export default function App() {
       const savedPal = (d.theme && (d.theme.palette as any)) || null
       if (savedPal && savedPal.primary) { setPalette(savedPal); applyPalette(savedPal) } else { applyPalette(palette) }
       setDirty(false)
+      
+      // Auto-run all KPIs when dashboard is loaded
+      // Use setTimeout to ensure state is updated before running KPIs
+      setTimeout(() => {
+        runAllKpis(d.kpis)
+      }, 100)
     }).catch(() => {})
   }, [routeId])
 
@@ -133,6 +140,24 @@ export default function App() {
     }
     const res = await api.runKpi(kpi.sql, filters, kpi.filter_date_column, kpi.expected_schema)
     setRowsByKpi(prev => ({...prev, [kpi.id]: res}))
+  }
+
+  async function runAllKpis(kpisToRun: any[]) {
+    if (kpisToRun.length === 0) return
+    
+    setKpiLoading(true)
+    toast('success', `Running ${kpisToRun.length} KPIs...`)
+    try {
+      for (const kpi of kpisToRun) {
+        await runKpi(kpi)
+      }
+      toast('success', `All KPIs executed successfully`)
+    } catch (error) {
+      console.warn('Failed to run some KPIs:', error)
+      toast('error', 'Some KPIs failed to execute')
+    } finally {
+      setKpiLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -222,7 +247,7 @@ export default function App() {
     }
   }
 
-  function addKpiToCanvas(item: any) {
+  async function addKpiToCanvas(item: any) {
     const id = `${item.dataset_id}.${item.table_id}:${item.id}`
     const k: any = {
       id,
@@ -237,6 +262,19 @@ export default function App() {
     }
     setKpis(prev => [...prev, k])
     setLayouts(prev => [...prev, { i: id, x: 0, y: Infinity, w: 6, h: 8 }])
+    
+    // Auto-run the new KPI when it's added
+    try {
+      setKpiLoading(true)
+      toast('success', `Auto-running new KPI: ${k.name}`)
+      await runKpi(k)
+      toast('success', `KPI "${k.name}" added and executed successfully`)
+    } catch (error) {
+      console.warn('Failed to auto-run new KPI:', error)
+      toast('error', `Failed to auto-run KPI: ${k.name}`)
+    } finally {
+      setKpiLoading(false)
+    }
   }
 
   function addTab() {
@@ -490,7 +528,9 @@ export default function App() {
         )}
 
         <div style={{ display: 'grid', gap: 12 }} ref={gridWrapRef}>
-          <div className="section-title">Dashboard {version && <span className="chip" style={{ marginLeft: 8 }}>v{version}</span>}
+          <div className="section-title">
+            Dashboard {version && <span className="chip" style={{ marginLeft: 8 }}>v{version}</span>}
+            {kpiLoading && <span className="badge" style={{ marginLeft: 8, background: 'var(--accent)', color: '#fff' }}>Running KPIs...</span>}
             {(() => {
               const current = dashList.find((d:any) => d.name === dashboardName && d.version === version)
               if (current?.default_flag) {
@@ -553,7 +593,11 @@ export default function App() {
             {visibleKpis.map(k => (
               <div key={k.id} data-grid={(activeLayout||[]).find(l => l.i === k.id)} className="card" style={{ display: 'flex', flexDirection: 'column' }}>
                 <div className="card-header">
-                  <div className="drag-handle"><div className="card-title">{k.name}</div><div className="card-subtitle">{k.short_description}</div></div>
+                  <div className="drag-handle">
+                    <div className="card-title">{k.name}</div>
+                    <div className="card-subtitle">{k.short_description}</div>
+                    {!rowsByKpi[k.id] && <span className="badge" style={{ marginLeft: 8, background: 'var(--accent)', color: '#fff', fontSize: '10px' }}>Loading...</span>}
+                  </div>
                   <div className="card-actions no-drag">
                     <button className="btn btn-sm" onClick={() => runKpi(k)}>Test</button>
                     <button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
