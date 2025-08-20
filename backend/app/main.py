@@ -238,6 +238,22 @@ def set_default_dashboard(payload: Dict[str, str]):
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
+@app.delete("/api/dashboards/default")
+def clear_default_dashboards():
+	try:
+		bq_service.clear_default_dashboards(dataset_id=DASH_DATASET)
+		return {"status": "ok"}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+@app.delete("/api/dashboards/{dashboard_id}")
+def delete_dashboard(dashboard_id: str):
+	try:
+		bq_service.delete_dashboard(dashboard_id, dataset_id=DASH_DATASET)
+		return {"status": "ok"}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
 @app.get("/api/dashboards/default")
 def get_default_dashboard():
 	try:

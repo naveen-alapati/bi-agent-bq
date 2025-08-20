@@ -265,6 +265,15 @@ class BigQueryService:
             for r in results
         ]
 
+    def _migrate_null_default_flags(self, table_fqn: str) -> None:
+        """Migrate existing dashboards with NULL default_flag values to FALSE."""
+        try:
+            # Update any NULL default_flag values to FALSE
+            sql = f"UPDATE `{table_fqn}` SET default_flag = FALSE WHERE default_flag IS NULL"
+            self.client.query(sql, location=self.location).result()
+        except Exception as e:
+            print(f"Warning: Failed to migrate NULL default_flags: {e}")
+
     def ensure_dashboards_table(self, dataset_id: str = "analytics_dash", table: str = "dashboards") -> str:
         self.ensure_dataset(dataset_id)
         table_fqn = f"{self.project_id}.{dataset_id}.{table}"
@@ -292,6 +301,9 @@ class BigQueryService:
             for name, typ in missing:
                 ddl = f"ALTER TABLE `{table_fqn}` ADD COLUMN IF NOT EXISTS {name} {typ}"
                 self.client.query(ddl, location=self.location).result()
+            
+            # Migrate existing NULL default_flags to FALSE
+            self._migrate_null_default_flags(table_fqn)
         except NotFound:
             schema = [bigquery.SchemaField(n, t) for (n, t) in required]
             table_obj = bigquery.Table(table_fqn, schema=schema)
@@ -301,16 +313,87 @@ class BigQueryService:
     def set_default_dashboard(self, dashboard_id: str, dataset_id: str = "analytics_dash") -> None:
         table = self.ensure_dashboards_table(dataset_id)
         # Clear previous default and set new one
+        # Use IS NOT DISTINCT FROM to handle NULL values properly
         sql = f"""
-        UPDATE `{table}` SET default_flag = FALSE WHERE default_flag = TRUE;
+        UPDATE `{table}` SET default_flag = FALSE WHERE default_flag IS NOT DISTINCT FROM TRUE;
         UPDATE `{table}` SET default_flag = TRUE WHERE id = @id;
         """
         job = self.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id","STRING", dashboard_id)]), location=self.location)
         list(job)
 
+    def delete_dashboard(self, dashboard_id: str, dataset_id: str = "analytics_dash") -> None:
+        """Delete a dashboard and ensure another becomes default if needed."""
+        table = self.ensure_dashboards_table(dataset_id)
+        
+        # Check if the dashboard to be deleted is the default
+        sql = f"SELECT default_flag FROM `{table}` WHERE id = @id"
+        job = self.client.query(
+            sql,
+            job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", dashboard_id)]),
+            location=self.location,
+        )
+        rows = list(job)
+        is_default = rows[0]["default_flag"] if rows else False
+        
+        # Delete the dashboard
+        sql = f"DELETE FROM `{table}` WHERE id = @id"
+        job = self.client.query(
+            sql,
+            job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", dashboard_id)]),
+            location=self.location,
+        )
+        job.result()
+        
+        # If the deleted dashboard was the default, ensure another becomes default
+        if is_default:
+            self._ensure_default_dashboard_exists(dataset_id)
+
+    def clear_default_dashboards(self, dataset_id: str = "analytics_dash") -> None:
+        """Clear all default flags from dashboards."""
+        table = self.ensure_dashboards_table(dataset_id)
+        sql = f"UPDATE `{table}` SET default_flag = FALSE WHERE default_flag IS NOT DISTINCT FROM TRUE"
+        job = self.client.query(sql, location=self.location)
+        list(job)
+
+    def _ensure_default_dashboard_exists(self, dataset_id: str = "analytics_dash") -> None:
+        """Ensure at least one dashboard is marked as default. If none exists, mark the most recent one as default."""
+        table = self.ensure_dashboards_table(dataset_id)
+        
+        # Check if any dashboard has default_flag = TRUE
+        sql = f"SELECT COUNT(*) as count FROM `{table}` WHERE default_flag = TRUE"
+        rows = list(self.client.query(sql, location=self.location))
+        has_default = rows[0]["count"] > 0 if rows else False
+        
+        if not has_default:
+            # Find the most recently updated dashboard and mark it as default
+            sql = f"SELECT id FROM `{table}` ORDER BY updated_at DESC LIMIT 1"
+            rows = list(self.client.query(sql, location=self.location))
+            if rows:
+                dashboard_id = rows[0]["id"]
+                # Set this dashboard as default
+                sql = f"UPDATE `{table}` SET default_flag = TRUE WHERE id = @id"
+                job = self.client.query(
+                    sql, 
+                    job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id","STRING", dashboard_id)]), 
+                    location=self.location
+                )
+                list(job)
+
     def get_default_dashboard(self, dataset_id: str = "analytics_dash") -> Optional[str]:
         table = self.ensure_dashboards_table(dataset_id)
+        
+        # Ensure at least one dashboard is marked as default
+        self._ensure_default_dashboard_exists(dataset_id)
+        
+        # First try to find a dashboard with default_flag = TRUE
         sql = f"SELECT id FROM `{table}` WHERE default_flag = TRUE LIMIT 1"
+        rows = list(self.client.query(sql, location=self.location))
+        if rows:
+            return rows[0]["id"]
+        
+        # If no default is set, fallback to the most recently updated dashboard
+        # This handles cases where default_flag is NULL or FALSE
+        sql = f"SELECT id FROM `{table}` ORDER BY updated_at DESC LIMIT 1"
         rows = list(self.client.query(sql, location=self.location))
         return rows[0]["id"] if rows else None
 
@@ -363,6 +446,7 @@ class BigQueryService:
             "selected_tables": json.dumps(selected_tables),
             "global_filters": json.dumps(global_filters or {}),
             "theme": json.dumps(theme or {}),
+            "default_flag": False,  # Set default to FALSE for new dashboards
             "tabs": json.dumps(tabs or []),
             "tab_layouts": json.dumps(tab_layouts or {}),
             "last_active_tab": (last_active_tab or "overview"),
@@ -377,13 +461,13 @@ class BigQueryService:
 
     def list_dashboards(self, dataset_id: str = "analytics_dash") -> List[Dict[str, Any]]:
         table = self.ensure_dashboards_table(dataset_id)
-        sql = f"SELECT id, name, version, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at FROM `{table}` ORDER BY name, updated_at DESC"
+        sql = f"SELECT id, name, version, default_flag, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at FROM `{table}` ORDER BY name, updated_at DESC"
         rows = [dict(r) for r in self.client.query(sql, location=self.location)]
         return rows
 
     def get_dashboard(self, dashboard_id: str, dataset_id: str = "analytics_dash") -> Optional[Dict[str, Any]]:
         table = self.ensure_dashboards_table(dataset_id)
-        sql = f"SELECT id, name, version, kpis, layout, layouts, selected_tables, global_filters, theme, tabs, tab_layouts, last_active_tab, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at FROM `{table}` WHERE id=@id LIMIT 1"
+        sql = f"SELECT id, name, version, kpis, layout, layouts, selected_tables, global_filters, theme, default_flag, tabs, tab_layouts, last_active_tab, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at FROM `{table}` WHERE id=@id LIMIT 1"
         job = self.client.query(
             sql,
             job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", dashboard_id)]),
@@ -408,6 +492,7 @@ class BigQueryService:
             "selected_tables": parse_json_field(row["selected_tables"]),
             "global_filters": parse_json_field(row.get("global_filters") or "{}"),
             "theme": parse_json_field(row.get("theme") or "{}"),
+            "default_flag": row.get("default_flag", False),
             "tabs": parse_json_field(row.get("tabs") or "[]"),
             "tab_layouts": parse_json_field(row.get("tab_layouts") or "{}"),
             "last_active_tab": row.get("last_active_tab") or "overview",
