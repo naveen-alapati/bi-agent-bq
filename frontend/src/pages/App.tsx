@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { TableSelector } from '../ui/TableSelector'
 import { KPIList } from '../ui/KPIList'
 import { ChartRenderer } from '../ui/ChartRenderer'
@@ -16,6 +16,7 @@ import remarkGfm from 'remark-gfm'
 export default function App() {
   const params = useParams()
   const [search] = useSearchParams()
+  const navigate = useNavigate()
   const routeId = params.id || search.get('dashboardId') || ''
   const [datasets, setDatasets] = useState<any[]>([])
   const [selected, setSelected] = useState<{datasetId: string, tableId: string}[]>([])
@@ -56,6 +57,9 @@ export default function App() {
   const [aiInput, setAiInput] = useState('')
   const [aiTyping, setAiTyping] = useState(false)
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0)
+  const [aiModalPosition, setAiModalPosition] = useState({ x: 0, y: 0 })
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
 
   function applyPalette(p: { primary: string; accent: string; surface: string; warn: string }) {
     const r = document.documentElement
@@ -64,6 +68,50 @@ export default function App() {
     r.style.setProperty('--surface', p.surface)
     r.style.setProperty('--warn', p.warn)
   }
+
+  // AI Modal drag handlers
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) {
+      setIsDragging(true)
+      const rect = e.currentTarget.getBoundingClientRect()
+      setDragOffset({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      })
+    }
+  }
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (isDragging) {
+      const modalWidth = 840
+      const modalHeight = 70 * window.innerHeight / 100
+      
+      // Calculate new position
+      let newX = e.clientX - dragOffset.x
+      let newY = e.clientY - dragOffset.y
+      
+      // Apply boundary constraints
+      newX = Math.max(0, Math.min(newX, window.innerWidth - modalWidth))
+      newY = Math.max(0, Math.min(newY, window.innerHeight - modalHeight))
+      
+      setAiModalPosition({ x: newX, y: newY })
+    }
+  }
+
+  const handleMouseUp = () => {
+    setIsDragging(false)
+  }
+
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove)
+        document.removeEventListener('mouseup', handleMouseUp)
+      }
+    }
+  }, [isDragging, dragOffset])
 
   useEffect(() => { applyPalette(palette) }, [])
 
@@ -190,6 +238,8 @@ export default function App() {
   async function saveDashboard() {
     setSaving(true)
     try {
+      console.log('Saving dashboard with routeId:', routeId, 'and name:', dashboardName)
+      
       const payload = {
         id: routeId, // Always pass the current ID if it exists
         name: dashboardName,
@@ -203,13 +253,26 @@ export default function App() {
         tab_layouts: tabLayouts,
         last_active_tab: activeTab,
       }
+      
+      console.log('Save payload:', payload)
       const res = await api.saveDashboard(payload as any)
+      console.log('Save response:', res)
+      
       setVersion(res.version)
-      setRouteId(res.id) // Update the route ID with the new one
+      
+      // If this is a new dashboard or the ID changed, navigate to the new URL
+      if (res.id !== routeId) {
+        console.log('Dashboard ID changed from', routeId, 'to', res.id, '- navigating to new URL')
+        navigate(`/editor/${res.id}`)
+      } else {
+        console.log('Dashboard ID unchanged, staying on current route')
+      }
+      
       await api.listDashboards().then(setDashList)
       toast('success', `Saved ${res.name} v${res.version}`)
       setDirty(false)
     } catch (e: any) {
+      console.error('Save dashboard error:', e)
       toast('error', e?.message || 'Failed to save')
     } finally {
       setSaving(false)
@@ -231,23 +294,7 @@ export default function App() {
 
 
 
-  async function deleteDashboard() {
-    if (!routeId) {
-      toast('error', 'Cannot delete unsaved dashboard')
-      return
-    }
-    
-    if (window.confirm(`Are you sure you want to delete "${dashboardName}"? This action cannot be undone.`)) {
-      try {
-        await api.deleteDashboard(routeId)
-        toast('success', 'Dashboard deleted')
-        // Redirect to home page after deletion
-        window.location.href = '/'
-      } catch (error) {
-        toast('error', 'Failed to delete dashboard')
-      }
-    }
-  }
+
 
   async function addKpiToCanvas(item: any) {
     const id = `${item.dataset_id}.${item.table_id}:${item.id}`
@@ -357,6 +404,11 @@ export default function App() {
     setAiEditKpi(k)
     setAiChat([{ role: 'assistant', text: 'Let\'s refine this KPI. Tell me what you\'d like to change (chart type, labels, SQL, grouping, filters).' }])
     setAiEditOpen(true)
+    
+    // Center the modal on screen when it opens
+    const centerX = Math.max(0, (window.innerWidth - 840) / 2)
+    const centerY = Math.max(0, (window.innerHeight - 70 * window.innerHeight / 100) / 2)
+    setAiModalPosition({ x: centerX, y: centerY })
   }
 
   async function sendAiEdit() {
@@ -389,22 +441,21 @@ export default function App() {
       <div className="toast-container">
         {toasts.map(t => (<div key={t.id} className={`toast ${t.type==='success'?'toast-success':'toast-error'}`}>{t.msg}</div>))}
       </div>
-      <TopBar
-        name={dashboardName}
-        version={version}
-        onNameChange={(v) => { setDashboardName(v); setDirty(true) }}
-        onSave={() => saveDashboard()}
-        globalDate={globalDate}
-        onGlobalDateChange={(v) => { setGlobalDate(v); setDirty(true) }}
-        theme={theme}
-        onThemeToggle={() => setTheme(t => (t === 'light' ? 'dark' : 'light'))}
-        onExportDashboard={exportDashboard}
-        onToggleSidebar={() => setSidebarOpen(o => !o)}
-        sidebarOpen={sidebarOpen}
-        dirty={dirty}
-        dashboardId={routeId}
-        onDeleteDashboard={deleteDashboard}
-      />
+        <TopBar
+          name={dashboardName}
+          version={version}
+          onNameChange={(v) => { setDashboardName(v); setDirty(true) }}
+          onSave={() => saveDashboard()}
+          globalDate={globalDate}
+          onGlobalDateChange={(v) => { setGlobalDate(v); setDirty(true) }}
+          theme={theme}
+          onThemeToggle={() => setTheme(t => (t === 'light' ? 'dark' : 'light'))}
+          onExportDashboard={exportDashboard}
+          onToggleSidebar={() => setSidebarOpen(o => !o)}
+          sidebarOpen={sidebarOpen}
+          dirty={dirty}
+          dashboardId={routeId}
+        />
 
       <div className={`app-grid ${!sidebarOpen ? 'app-grid--collapsed' : ''}`}>
         {(
@@ -598,10 +649,40 @@ export default function App() {
         </div>
       </div>
       {aiEditOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-          <div style={{ width: 'min(840px, 92vw)', height: 'min(70vh, 85vh)', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderBottom: '1px solid var(--border)' }}>
-              <div className="card-title">AI Edit: {aiEditKpi?.name}</div>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999 }}>
+          <div 
+            style={{ 
+              position: 'absolute',
+              left: aiModalPosition.x,
+              top: aiModalPosition.y,
+              width: 'min(840px, 92vw)', 
+              height: 'min(70vh, 85vh)', 
+              background: 'var(--card)', 
+              border: '1px solid var(--border)', 
+              borderRadius: 12, 
+              display: 'flex', 
+              flexDirection: 'column',
+              cursor: isDragging ? 'grabbing' : 'default',
+              transition: isDragging ? 'none' : 'box-shadow 0.2s ease',
+              boxShadow: isDragging ? '0 8px 32px rgba(0,0,0,0.3)' : 'var(--shadow)'
+            }}
+          >
+            <div 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'space-between', 
+                padding: 12, 
+                borderBottom: '1px solid var(--border)',
+                cursor: 'grab',
+                userSelect: 'none'
+              }}
+              onMouseDown={handleMouseDown}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: '14px', opacity: 0.6 }}>⋮⋮</span>
+                <div className="card-title">AI Edit: {aiEditKpi?.name}</div>
+              </div>
               <div className="toolbar">
                 <button className="btn btn-sm" onClick={() => setAiEditOpen(false)}>✕</button>
               </div>
