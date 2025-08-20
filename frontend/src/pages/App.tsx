@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { TableSelector } from '../ui/TableSelector'
 import { KPIList } from '../ui/KPIList'
 import { ChartRenderer } from '../ui/ChartRenderer'
@@ -16,6 +16,7 @@ import remarkGfm from 'remark-gfm'
 export default function App() {
   const params = useParams()
   const [search] = useSearchParams()
+  const navigate = useNavigate()
   const routeId = params.id || search.get('dashboardId') || ''
   const [datasets, setDatasets] = useState<any[]>([])
   const [selected, setSelected] = useState<{datasetId: string, tableId: string}[]>([])
@@ -190,6 +191,8 @@ export default function App() {
   async function saveDashboard() {
     setSaving(true)
     try {
+      console.log('Saving dashboard with routeId:', routeId, 'and name:', dashboardName)
+      
       const payload = {
         id: routeId, // Always pass the current ID if it exists
         name: dashboardName,
@@ -203,13 +206,26 @@ export default function App() {
         tab_layouts: tabLayouts,
         last_active_tab: activeTab,
       }
+      
+      console.log('Save payload:', payload)
       const res = await api.saveDashboard(payload as any)
+      console.log('Save response:', res)
+      
       setVersion(res.version)
-      setRouteId(res.id) // Update the route ID with the new one
+      
+      // If this is a new dashboard or the ID changed, navigate to the new URL
+      if (res.id !== routeId) {
+        console.log('Dashboard ID changed from', routeId, 'to', res.id, '- navigating to new URL')
+        navigate(`/editor/${res.id}`)
+      } else {
+        console.log('Dashboard ID unchanged, staying on current route')
+      }
+      
       await api.listDashboards().then(setDashList)
       toast('success', `Saved ${res.name} v${res.version}`)
       setDirty(false)
     } catch (e: any) {
+      console.error('Save dashboard error:', e)
       toast('error', e?.message || 'Failed to save')
     } finally {
       setSaving(false)
