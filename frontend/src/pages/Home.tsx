@@ -351,38 +351,147 @@ export default function Home() {
     })
   }
 
+  // Enhanced markdown processing with support for **bold** and *italic* formatting
+  function renderMarkdownText(doc: jsPDF, text: string, x: number, y: number, maxWidth: number): { height: number } {
+    // Parse inline markdown: **bold**, *italic* 
+    const parts = []
+    let processedText = text
+    
+    // Process **bold** and *italic* patterns
+    const patterns = [
+      { regex: /\*\*(.*?)\*\*/g, style: 'bold' },
+      { regex: /\*(.*?)\*/g, style: 'italic' }
+    ]
+    
+    // Simple approach: parse bold first, then italic
+    let currentPos = 0
+    let matches = []
+    
+    // Find all formatting patterns
+    patterns.forEach(pattern => {
+      let match
+      while ((match = pattern.regex.exec(text)) !== null) {
+        matches.push({
+          start: match.index,
+          end: match.index + match[0].length,
+          text: match[1],
+          style: pattern.style,
+          fullMatch: match[0]
+        })
+      }
+    })
+    
+    // Sort matches by position
+    matches.sort((a, b) => a.start - b.start)
+    
+    // Build parts array without overlapping matches
+    currentPos = 0
+    for (const match of matches) {
+      // Skip overlapping matches (prefer the first one)
+      if (match.start < currentPos) continue
+      
+      // Add text before the formatted part
+      if (match.start > currentPos) {
+        parts.push({ text: text.substring(currentPos, match.start), style: 'normal' })
+      }
+      
+      // Add the formatted part
+      parts.push({ text: match.text, style: match.style })
+      currentPos = match.end
+    }
+    
+    // Add remaining text
+    if (currentPos < text.length) {
+      parts.push({ text: text.substring(currentPos), style: 'normal' })
+    }
+    
+    // If no formatting found, treat as single normal text
+    if (parts.length === 0) {
+      parts.push({ text: text, style: 'normal' })
+    }
+    
+    // Render the parts with improved word wrapping
+    let currentX = x
+    let currentY = y
+    const lineHeight = 6
+    
+    for (const part of parts) {
+      if (!part.text) continue
+      
+      // Set font based on formatting (note: jsPDF has limited italic support)
+      const fontWeight = part.style === 'bold' ? 'bold' : 'normal'
+      doc.setFont('helvetica', fontWeight)
+      doc.setFontSize(11)
+      
+      // Split into words for proper wrapping
+      const words = part.text.split(' ')
+      
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i]
+        const space = i < words.length - 1 ? ' ' : ''
+        const wordWithSpace = word + space
+        const wordWidth = doc.getTextWidth(wordWithSpace)
+        
+        // Check if word fits on current line
+        if (currentX + wordWidth > x + maxWidth && currentX > x) {
+          currentY += lineHeight
+          currentX = x
+        }
+        
+        // Render the word
+        doc.text(word, currentX, currentY)
+        currentX += doc.getTextWidth(word)
+        
+        // Add space if not the last word
+        if (space) {
+          currentX += doc.getTextWidth(' ')
+        }
+      }
+    }
+    
+    return { height: Math.max(lineHeight, currentY - y + lineHeight) }
+  }
+
   function addSummaryPage(doc: jsPDF, dashboardName: string | undefined, mdText: string) {
     drawBrandHeader(doc, 'CXO Summary', new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }))
-    // simple markdown-ish rendering: treat lines starting with '#' as headers, '-' as bullets
+    // Enhanced markdown rendering with support for **bold**, *italic*, headers, and bullets
     const lines = (mdText || '').split(/\r?\n/)
     let y = 46
     const margin = 14
+    const maxWidth = 180
+    
     for (const raw of lines) {
       let line = raw.trim()
       if (!line) { y += 4; continue }
+      
       if (line.startsWith('###')) {
         doc.setFont('helvetica', 'bold'); doc.setFontSize(12)
-        doc.text(line.replace(/^###\s*/, ''), margin, y)
+        const cleanText = line.replace(/^###\s*/, '').replace(/\*\*(.*?)\*\*/g, '$1') // Remove ** from headers
+        doc.text(cleanText, margin, y)
         y += 8
       } else if (line.startsWith('##')) {
-        drawSectionHeader(doc, y, line.replace(/^##\s*/, ''))
+        const cleanText = line.replace(/^##\s*/, '').replace(/\*\*(.*?)\*\*/g, '$1') // Remove ** from headers
+        drawSectionHeader(doc, y, cleanText)
         y += 12
       } else if (line.startsWith('#')) {
         doc.setFont('helvetica', 'bold'); doc.setFontSize(14)
-        doc.text(line.replace(/^#\s*/, ''), margin, y)
+        const cleanText = line.replace(/^#\s*/, '').replace(/\*\*(.*?)\*\*/g, '$1') // Remove ** from headers
+        doc.text(cleanText, margin, y)
         y += 10
       } else if (line.match(/^[-*•]\s+/)) {
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(11)
-        const bullet = '• ' + line.replace(/^[-*•]\s+/, '')
-        const wrapped = (doc as any).splitTextToSize(bullet, 180)
-        doc.text(wrapped, margin, y)
-        y += 6 + (wrapped.length - 1) * 5
+        const bulletText = '• ' + line.replace(/^[-*•]\s+/, '')
+        const result = renderMarkdownText(doc, bulletText, margin, y, maxWidth)
+        y += result.height
+      } else if (line.match(/^\d+\.\s+/)) {
+        // Handle numbered lists (1. 2. 3. etc.)
+        const result = renderMarkdownText(doc, line, margin, y, maxWidth)
+        y += result.height
       } else {
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(11)
-        const wrapped = (doc as any).splitTextToSize(line, 180)
-        doc.text(wrapped, margin, y)
-        y += 6 + (wrapped.length - 1) * 5
+        const result = renderMarkdownText(doc, line, margin, y, maxWidth)
+        y += result.height
       }
+      
+      // Check for page break
       if (y > 260) {
         const nextPage = ((doc as any).getNumberOfPages?.() || 1) + 1
         drawFooter(doc, nextPage - 1)
