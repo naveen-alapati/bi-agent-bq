@@ -23,7 +23,6 @@ export default function App() {
   const [kpis, setKpis] = useState<any[]>([])
   const [rowsByKpi, setRowsByKpi] = useState<Record<string, any[]>>({})
   const [loading, setLoading] = useState(false)
-  const [kpiLoading, setKpiLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [dashboardName, setDashboardName] = useState('ecom-v1')
   const [version, setVersion] = useState<string>('')
@@ -157,11 +156,8 @@ export default function App() {
       if (savedPal && savedPal.primary) { setPalette(savedPal); applyPalette(savedPal) } else { applyPalette(palette) }
       setDirty(false)
       
-      // Auto-run all KPIs when dashboard is loaded
-      // Use setTimeout to ensure state is updated before running KPIs
-      setTimeout(() => {
-        runAllKpis(d.kpis)
-      }, 100)
+      // Note: KPIs are not auto-run in editor mode to avoid double loading
+      // Users can manually run KPIs using the "Test" button on each chart
     }).catch(() => {})
   }, [routeId])
 
@@ -210,23 +206,7 @@ export default function App() {
     setRowsByKpi(prev => ({...prev, [kpi.id]: res}))
   }
 
-  async function runAllKpis(kpisToRun: any[]) {
-    if (kpisToRun.length === 0) return
-    
-    setKpiLoading(true)
-    toast('success', `Running ${kpisToRun.length} KPIs...`)
-    try {
-      for (const kpi of kpisToRun) {
-        await runKpi(kpi)
-      }
-      toast('success', `All KPIs executed successfully`)
-    } catch (error) {
-      console.warn('Failed to run some KPIs:', error)
-      toast('error', 'Some KPIs failed to execute')
-    } finally {
-      setKpiLoading(false)
-    }
-  }
+
 
   useEffect(() => {
     const defaultLayout = kpis.map((k, i) => ({ i: k.id, x: (i % 2) * 6, y: Math.floor(i / 2) * 8, w: 6, h: 8 }))
@@ -319,15 +299,12 @@ export default function App() {
     
     // Auto-run the new KPI when it's added
     try {
-      setKpiLoading(true)
       toast('success', `Auto-running new KPI: ${k.name}`)
       await runKpi(k)
       toast('success', `KPI "${k.name}" added and executed successfully`)
     } catch (error) {
       console.warn('Failed to auto-run new KPI:', error)
       toast('error', `Failed to auto-run KPI: ${k.name}`)
-    } finally {
-      setKpiLoading(false)
     }
   }
 
@@ -592,8 +569,6 @@ export default function App() {
         <div style={{ display: 'grid', gap: 12 }} ref={gridWrapRef}>
           <div className="section-title">
             Dashboard {version && <span className="chip" style={{ marginLeft: 8 }}>v{version}</span>}
-            {kpiLoading && <span className="badge" style={{ marginLeft: 8, background: 'var(--accent)', color: '#fff' }}>Running KPIs...</span>}
-    
           </div>
 
           <div className="tabs-bar">
