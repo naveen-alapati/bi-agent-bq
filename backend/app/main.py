@@ -169,16 +169,34 @@ def run_kpi(req: RunKpiRequest):
 			if col and val is not None:
 				where_clauses.append(f"{col} = @catValue")
 				params.append(bigquery.ScalarQueryParameter("catValue", "STRING", str(val)))
-		if where_clauses:
-			wrapped = f"SELECT * FROM ( {sql} ) WHERE " + " AND ".join(where_clauses)
-			job_config = bigquery.QueryJobConfig(query_parameters=params)
-			rows_iter = bq_service.client.query(wrapped, job_config=job_config, location=bq_service.location)
-			result_rows = [dict(r) for r in rows_iter]
-			# normalize
-			norm = [ { k: bq_service._normalize_value(v) for k, v in r.items() } for r in result_rows ]
-			return {"rows": norm}
-		rows = bq_service.query_rows(sql)
-		return {"rows": rows}
+		# Helper to run query (with optional WHERE wrapper)
+		def _run_query(q: str):
+			if where_clauses:
+				wrapped = f"SELECT * FROM ( {q} ) WHERE " + " AND ".join(where_clauses)
+				job_config = bigquery.QueryJobConfig(query_parameters=params)
+				rows_iter = bq_service.client.query(wrapped, job_config=job_config, location=bq_service.location)
+				result_rows = [dict(r) for r in rows_iter]
+				return [ { k: bq_service._normalize_value(v) for k, v in r.items() } for r in result_rows ]
+			rows = bq_service.query_rows(q)
+			return rows
+		# First attempt
+		try:
+			rows = _run_query(sql)
+			return {"rows": rows}
+		except Exception as inner_exc:
+			msg = str(inner_exc).lower()
+			# BigQuery division-by-zero errors may mention divide by zero / invalid / safe divide
+			if "divide by zero" in msg or "division by zero" in msg:
+				try:
+					# Ask LLM to rewrite with SAFE_DIVIDE while preserving schema/aliases
+					fixed_sql = kpi_service.llm.edit_sql(sql, "Rewrite to use SAFE_DIVIDE for all divisions; preserve output columns and aliases.")
+					rows = _run_query(fixed_sql)
+					return {"rows": rows}
+				except Exception:
+					# Fall through to raise original error if retry fails
+					pass
+			# If not a divide-by-zero or retry failed, rethrow the original
+			raise inner_exc
 	except Exception as exc:
 		raise HTTPException(status_code=400, detail=str(exc))
 
