@@ -226,19 +226,26 @@ class KPIService:
                 "answers_provided": answers or []
             })
             
+            print(f"Generating custom KPI with provider: {self.llm.provider}")
             result = self.llm.generate_json(system_prompt, user_prompt)
+            print(f"LLM response received: {type(result)}")
             
             if not isinstance(result, dict):
+                print(f"Invalid LLM response type: {type(result)}, content: {result}")
                 raise Exception("Invalid response format from LLM")
             
             # Check if we need to ask clarifying questions
             if "clarifying_questions" in result and result["clarifying_questions"]:
+                print(f"Returning clarifying questions: {result['clarifying_questions']}")
                 return {"clarifying_questions": result["clarifying_questions"]}
             
             # Generate the KPI
             kpi_data = result.get("kpi", {})
             if not kpi_data:
+                print(f"No KPI data in response: {result}")
                 raise Exception("No KPI data generated")
+            
+            print(f"KPI data generated: {kpi_data}")
             
             # Create table slug for the KPI ID
             table_slug = f"{tables[0].datasetId}.{tables[0].tableId}"
@@ -251,7 +258,8 @@ class KPIService:
                     if c.get('type') in ('DATE','TIMESTAMP','DATETIME'):
                         date_col = c['name']
                         break
-            except Exception:
+            except Exception as schema_exc:
+                print(f"Could not infer date column from schema: {schema_exc}")
                 pass
             
             return KPIItem(
@@ -269,17 +277,39 @@ class KPIService:
             
         except Exception as exc:
             print(f"Custom KPI generation error: {exc}")
+            import traceback
+            traceback.print_exc()
+            
             # Return a fallback KPI
-            table_slug = f"{tables[0].datasetId}.{tables[0].tableId}"
-            return KPIItem(
-                id=f"{table_slug}:custom_fallback_{uuid.uuid4().hex[:8]}",
-                name="Custom KPI",
-                short_description=description,
-                chart_type="bar",
-                d3_chart="",
-                expected_schema="categorical",
-                sql=f"SELECT 'Custom KPI' as label, 1 as value FROM `{tables[0].datasetId}.{tables[0].tableId}` LIMIT 1",
-                engine="vega-lite",
-                vega_lite_spec=None,
-                filter_date_column=None,
-            )
+            try:
+                table_slug = f"{tables[0].datasetId}.{tables[0].tableId}"
+                # Use proper BigQuery table reference format
+                table_ref = f"`{tables[0].projectId}.{tables[0].datasetId}.{tables[0].tableId}`"
+                
+                return KPIItem(
+                    id=f"{table_slug}:custom_fallback_{uuid.uuid4().hex[:8]}",
+                    name="Custom KPI",
+                    short_description=description,
+                    chart_type="bar",
+                    d3_chart="",
+                    expected_schema="categorical",
+                    sql=f"SELECT 'Custom KPI' as label, 1 as value FROM {table_ref} LIMIT 1",
+                    engine="vega-lite",
+                    vega_lite_spec=None,
+                    filter_date_column=None,
+                )
+            except Exception as fallback_exc:
+                print(f"Fallback KPI generation also failed: {fallback_exc}")
+                # Last resort - return minimal KPI
+                return KPIItem(
+                    id=f"fallback_{uuid.uuid4().hex[:8]}",
+                    name="Custom KPI",
+                    short_description=description,
+                    chart_type="bar",
+                    d3_chart="",
+                    expected_schema="categorical",
+                    sql="SELECT 'Custom KPI' as label, 1 as value",
+                    engine="vega-lite",
+                    vega_lite_spec=None,
+                    filter_date_column=None,
+                )

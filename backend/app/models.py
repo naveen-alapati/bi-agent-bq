@@ -25,6 +25,7 @@ class TableInfoResponse(BaseModel):
 
 
 class TableRef(BaseModel):
+	projectId: str
 	datasetId: str
 	tableId: str
 

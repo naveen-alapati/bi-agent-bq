@@ -61,7 +61,7 @@ def run_self_test(
         results["steps"].append({"step": "list_tables", "status": "error", "error": str(exc), "stack": traceback.format_exc()})
         return results
 
-    selected_tables = [TableRef(datasetId=chosen_dataset, tableId=t["tableId"]) for t in tables_resp[: max(1, min(limit_tables, len(tables_resp)))] ]
+    selected_tables = [TableRef(projectId=bq.project_id, datasetId=chosen_dataset, tableId=t["tableId"]) for t in tables_resp[: max(1, min(limit_tables, len(tables_resp)))] ]
     results["selected_tables"] = [{"datasetId": t.datasetId, "tableId": t.tableId} for t in selected_tables]
 
     # Step: prepare

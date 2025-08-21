@@ -18,5 +18,14 @@ spec:
               value: bigquery
             - name: BQ_EMBEDDING_MODEL_FQN
               value: PROJECT_ID.analytics_poc.embedding_model
+            - name: LLM_PROVIDER
+              value: gemini
+            - name: GEMINI_MODEL
+              value: gemini-2.0-flash
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gemini-api-key
+                  key: latest
           ports:
             - containerPort: 8080
