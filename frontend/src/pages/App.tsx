@@ -165,9 +165,24 @@ export default function App() {
       const savedPal = (d.theme && (d.theme.palette as any)) || null
       if (savedPal && savedPal.primary) { setPalette(savedPal); applyPalette(savedPal) } else { applyPalette(palette) }
       setDirty(false)
-      
-      // Note: KPIs are not auto-run in editor mode to avoid double loading
-      // Users can manually run KPIs using the "Test" button on each chart
+
+      // Auto-run KPIs for the active tab on initial load in Editor
+      try {
+        const active = d.last_active_tab || 'overview'
+        const visible = (d.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(active) : active === 'overview'))
+        setTimeout(async () => {
+          for (const k of visible) {
+            try {
+              const res = await api.runKpi(k.sql, { date: (d.global_filters && d.global_filters.date) || {} }, k.filter_date_column, k.expected_schema)
+              setRowsByKpi(prev => ({ ...prev, [k.id]: res }))
+            } catch (e) {
+              console.warn('Auto-run KPI failed:', k.name, e)
+            }
+          }
+        }, 0)
+      } catch (e) {
+        console.warn('Failed during initial KPI auto-run', e)
+      }
     }).catch(() => {})
   }, [routeId])
 
@@ -605,6 +620,24 @@ export default function App() {
                     const savedPal = (d.theme && (d.theme.palette as any)) || null
                     if (savedPal && savedPal.primary) { setPalette(savedPal); applyPalette(savedPal) } else { applyPalette(palette) }
                     setDirty(false)
+
+                    // Auto-run KPIs on dashboard switch in Editor
+                    try {
+                      const active = d.last_active_tab || 'overview'
+                      const visible = (d.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(active) : active === 'overview'))
+                      setTimeout(async () => {
+                        for (const k of visible) {
+                          try {
+                            const res = await api.runKpi(k.sql, { date: (d.global_filters && d.global_filters.date) || {} }, k.filter_date_column, k.expected_schema)
+                            setRowsByKpi(prev => ({ ...prev, [k.id]: res }))
+                          } catch (e) {
+                            console.warn('Auto-run KPI failed:', k.name, e)
+                          }
+                        }
+                      }, 0)
+                    } catch (e) {
+                      console.warn('Failed during KPI auto-run on dashboard switch', e)
+                    }
                   })
                 }}>
                   <option value="">Load existing...</option>
