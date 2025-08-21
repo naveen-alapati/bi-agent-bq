@@ -3,6 +3,7 @@ import json
 import os
 import uuid
 from datetime import datetime, timezone
+import re
 
 from .bq import BigQueryService
 from .embeddings import EmbeddingService
@@ -202,14 +203,30 @@ class KPIService:
         return None
 
     def _normalize_expected_schema(self, expected: Any) -> str:
-        """Return a normalized expected_schema string from various shapes or dicts."""
+        """Return a normalized expected_schema string from various shapes or dicts.
+
+        Accepts flexible inputs (string variants, dicts with x/y or label/value) and maps
+        to one of: timeseries | categorical | distribution | scatter. Returns empty string
+        when it cannot be determined.
+        """
         try:
+            # Direct string handling with fuzzy mapping
             if isinstance(expected, str):
-                return expected
+                s = expected.strip().lower()
+                if not s:
+                    return ""
+                # Common fuzzy variants
+                if "time" in s or "series" in s:
+                    return "timeseries"
+                for candidate in ("timeseries", "categorical", "distribution", "scatter"):
+                    if s.startswith(candidate) or candidate in s:
+                        return candidate
+                return ""
+            # Dict-like schema
             if isinstance(expected, dict):
                 schema_type = expected.get("type")
                 if isinstance(schema_type, str):
-                    return schema_type
+                    return self._normalize_expected_schema(schema_type)
                 lowered_keys = {str(k).lower() for k in expected.keys()}
                 if {"x", "y"}.issubset(lowered_keys):
                     return "timeseries"
@@ -220,6 +237,76 @@ class KPIService:
         except Exception:
             return ""
 
+    def _normalize_chart_type(self, chart_type: Any) -> str:
+        """Normalize chart_type; pick first valid token from free-form strings."""
+        valid = {"line", "bar", "pie", "area", "scatter"}
+        try:
+            if isinstance(chart_type, str):
+                tokens = re.split(r"[^a-zA-Z]+", chart_type.strip().lower())
+                for tok in tokens:
+                    if tok in valid:
+                        return tok
+            return "bar"
+        except Exception:
+            return "bar"
+
+    def _strip_code_fences(self, text: Any) -> str:
+        """Remove triple backtick code fences and language hints from a string value."""
+        if not isinstance(text, str):
+            return ""
+        s = text.strip()
+        if s.startswith("```"):
+            # remove leading and trailing fences
+            s = s.strip("`")
+            # drop leading language tag if present
+            if s.startswith("json") or s.startswith("sql"):
+                s = s.split("\n", 1)[1] if "\n" in s else ""
+        return s.strip()
+
+    def _normalize_vega_lite_spec(self, spec: Any) -> Any:
+        """Ensure vega_lite_spec is a dict or None; parse JSON strings when possible."""
+        try:
+            if spec is None:
+                return None
+            if isinstance(spec, dict):
+                # Ensure minimal skeleton for downstream renderers
+                if "data" not in spec:
+                    spec["data"] = {"values": []}
+                elif isinstance(spec["data"], dict) and "values" not in spec["data"]:
+                    spec["data"]["values"] = []
+                return spec
+            if isinstance(spec, str):
+                s = self._strip_code_fences(spec)
+                try:
+                    obj = json.loads(s)
+                    return self._normalize_vega_lite_spec(obj)
+                except Exception:
+                    return None
+            return None
+        except Exception:
+            return None
+
+    def _coerce_llm_result(self, result: Any) -> Dict[str, Any]:
+        """Coerce LLM response into a dict with key 'kpis' when possible."""
+        try:
+            if isinstance(result, dict):
+                return result
+            if isinstance(result, str):
+                s = self._strip_code_fences(result)
+                try:
+                    obj = json.loads(s)
+                    if isinstance(obj, dict):
+                        return obj
+                    if isinstance(obj, list):
+                        return {"kpis": obj}
+                except Exception:
+                    return {}
+            if isinstance(result, list):
+                return {"kpis": result}
+            return {}
+        except Exception:
+            return {}
+
     def generate_kpis(self, tables: List[TableRef], k: int = 5) -> List[KPIItem]:
         all_items: List[KPIItem] = []
         # Per-table KPIs (existing behavior)
@@ -227,7 +314,7 @@ class KPIService:
             try:
                 system_prompt = SYSTEM_PROMPT_TEMPLATE.format(k=k)
                 user_prompt = self._build_input_json([t])
-                result = self.llm.generate_json(system_prompt, user_prompt)
+                result = self._coerce_llm_result(self.llm.generate_json(system_prompt, user_prompt))
             except Exception as exc:
                 if self.kpi_fallback_enabled:
                     all_items.extend(self._fallback_kpis_for_table(t.datasetId, t.tableId, k))
@@ -238,31 +325,33 @@ class KPIService:
             # Attempt to infer a reasonable date column from schema for filtering
             date_col = self._infer_date_col_from_schema(t.datasetId, t.tableId)
             count = 0
-            for item in (result.get("kpis") or []):
+            for raw in (result.get("kpis") or []):
                 if count >= k:
                     break
-                sql = item.get("sql", "")
-                expected_schema = self._normalize_expected_schema(item.get("expected_schema", ""))
-                if not sql or not expected_schema:
-                    continue
-                slug = item.get("id", f"kpi_{count+1}")
-                # Ensure timeseries can be filtered by date: default to 'x' which is the date alias
-                filter_col = item.get("filter_date_column") or ("x" if isinstance(expected_schema, str) and expected_schema.startswith("timeseries") else date_col)
-                all_items.append(
-                    KPIItem(
+                try:
+                    sql = self._strip_code_fences(raw.get("sql", ""))
+                    expected_schema = self._normalize_expected_schema(raw.get("expected_schema", ""))
+                    if not sql or not expected_schema:
+                        continue
+                    slug = raw.get("id", f"kpi_{count+1}")
+                    # Ensure timeseries can be filtered by date: default to 'x' which is the date alias
+                    filter_col = raw.get("filter_date_column") or ("x" if isinstance(expected_schema, str) and expected_schema.startswith("timeseries") else date_col)
+                    item = KPIItem(
                         id=f"{table_slug}:{slug}",
-                        name=item.get("name", "KPI"),
-                        short_description=item.get("short_description", ""),
-                        chart_type=item.get("chart_type", "bar"),
-                        d3_chart=item.get("d3_chart", ""),
+                        name=(raw.get("name") or "KPI"),
+                        short_description=(raw.get("short_description") or ""),
+                        chart_type=self._normalize_chart_type(raw.get("chart_type", "bar")),
+                        d3_chart=(raw.get("d3_chart") or ""),
                         expected_schema=expected_schema,
                         sql=sql,
-                        engine=item.get("engine", "vega-lite" if item.get("vega_lite_spec") else "vega-lite"),
-                        vega_lite_spec=item.get("vega_lite_spec"),
+                        engine="vega-lite",
+                        vega_lite_spec=self._normalize_vega_lite_spec(raw.get("vega_lite_spec")),
                         filter_date_column=filter_col,
                     )
-                )
-                count += 1
+                    all_items.append(item)
+                    count += 1
+                except Exception as item_exc:
+                    print(f"Skipping malformed KPI for {table_slug}: {item_exc}")
         # Cross-table KPIs (new behavior)
         if len(tables) >= 2:
             try:
@@ -270,35 +359,37 @@ class KPIService:
                 primary_slug = f"{primary.datasetId}.{primary.tableId}"
                 system_prompt = CROSS_SYSTEM_PROMPT_TEMPLATE.format(k=max(1, min(k, 7)))
                 user_prompt = self._build_input_json(tables)
-                cross_result = self.llm.generate_json(system_prompt, user_prompt)
+                cross_result = self._coerce_llm_result(self.llm.generate_json(system_prompt, user_prompt))
                 # Attempt to infer date column from primary; default to 'x' for timeseries
                 primary_date_col = self._infer_date_col_from_schema(primary.datasetId, primary.tableId)
                 count = 0
-                for item in (cross_result.get("kpis") or []):
+                for raw in (cross_result.get("kpis") or []):
                     if count >= k:
                         break
-                    sql = item.get("sql", "")
-                    expected_schema = self._normalize_expected_schema(item.get("expected_schema", ""))
-                    if not sql or not expected_schema:
-                        continue
-                    base_slug = item.get("id", f"cross_{count+1}")
-                    slug = f"cross_{base_slug}"
-                    filter_col = item.get("filter_date_column") or ("x" if isinstance(expected_schema, str) and expected_schema.startswith("timeseries") else primary_date_col)
-                    all_items.append(
-                        KPIItem(
+                    try:
+                        sql = self._strip_code_fences(raw.get("sql", ""))
+                        expected_schema = self._normalize_expected_schema(raw.get("expected_schema", ""))
+                        if not sql or not expected_schema:
+                            continue
+                        base_slug = raw.get("id", f"cross_{count+1}")
+                        slug = f"cross_{base_slug}"
+                        filter_col = raw.get("filter_date_column") or ("x" if isinstance(expected_schema, str) and expected_schema.startswith("timeseries") else primary_date_col)
+                        item = KPIItem(
                             id=f"{primary_slug}:{slug}",
-                            name=item.get("name", "KPI"),
-                            short_description=item.get("short_description", ""),
-                            chart_type=item.get("chart_type", "bar"),
-                            d3_chart=item.get("d3_chart", ""),
+                            name=(raw.get("name") or "KPI"),
+                            short_description=(raw.get("short_description") or ""),
+                            chart_type=self._normalize_chart_type(raw.get("chart_type", "bar")),
+                            d3_chart=(raw.get("d3_chart") or ""),
                             expected_schema=expected_schema,
                             sql=sql,
-                            engine=item.get("engine", "vega-lite" if item.get("vega_lite_spec") else "vega-lite"),
-                            vega_lite_spec=item.get("vega_lite_spec"),
+                            engine="vega-lite",
+                            vega_lite_spec=self._normalize_vega_lite_spec(raw.get("vega_lite_spec")),
                             filter_date_column=filter_col,
                         )
-                    )
-                    count += 1
+                        all_items.append(item)
+                        count += 1
+                    except Exception as item_exc:
+                        print(f"Skipping malformed cross-table KPI for {primary_slug}: {item_exc}")
             except Exception as exc:
                 print(f"Cross-table KPI generation error: {exc}")
         if not all_items:
