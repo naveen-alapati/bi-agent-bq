@@ -77,13 +77,9 @@ def health() -> Dict[str, str]:
 
 
 @app.get("/api/datasets", response_model=DatasetResponse)
-def list_datasets(include_backend: bool = False):
+def list_datasets():
 	try:
 		datasets = bq_service.list_datasets()
-		if not include_backend:
-			# Exclude backend-created datasets and known internal ones
-			excluded = {"analytics_cxo", "analytics_dash", "analytics_poc"}
-			datasets = [d for d in datasets if (d.get("datasetId") not in excluded) and (not d.get("isBackendCreated"))]
 		return {"datasets": datasets}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
@@ -495,25 +491,10 @@ def cxo_send(payload: Dict[str, Any]):
 			"history": history[-20:],
 			"question": message,
 		}
-		# Attempt to generate a response via LLM. If it fails, return a graceful fallback instead of 500.
-		try:
-			resp = llm_client.generate_json(
-				"Return JSON with key 'text' only, value is Markdown answer per instructions.",
-				json.dumps(user_obj),
-			)
-		except Exception:
-			bot_text = (
-				"CXO AI Assist is temporarily unavailable. Please try again later.\n\n"
-				"Details: unable to reach the LLM provider."
-			)
-			# store assistant message with embedding
-			asst_emb = None
-			try:
-				asst_emb = embedding_service.embed_text(bot_text)
-			except Exception:
-				asst_emb = []
-			bq_service.add_cxo_message(conversation_id, role="assistant", content=bot_text, embedding=asst_emb)
-			return {"reply": bot_text}
+		resp = llm_client.generate_json(
+			"Return JSON with key 'text' only, value is Markdown answer per instructions.",
+			json.dumps(user_obj),
+		)
 		bot_text = ""
 		try:
 			bot_text = resp.get('text') if isinstance(resp, dict) else ""
