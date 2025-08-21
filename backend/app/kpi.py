@@ -171,7 +171,7 @@ class KPIService:
                         d3_chart=item.get("d3_chart", ""),
                         expected_schema=expected_schema,
                         sql=sql,
-                        engine=item.get("engine", "vega-lite" if item.get("vega_lite_spec") else None),
+                        engine=item.get("engine", "vega-lite" if item.get("vega_lite_spec") else "vega-lite"),
                         vega_lite_spec=item.get("vega_lite_spec"),
                         filter_date_column=item.get("filter_date_column") or date_col,
                     )
@@ -181,3 +181,105 @@ class KPIService:
             # Return empty list rather than raising, to avoid 500 and let UI handle gracefully
             return []
         return all_items
+
+    def generate_custom_kpi(self, tables: List[TableRef], description: str, answers: List[str] = None) -> KPIItem:
+        """
+        Generate a custom KPI based on user description and clarifying questions.
+        """
+        try:
+            # Build context from tables
+            table_info = self._build_input_json(tables)
+            
+            # Create system prompt for custom KPI generation
+            system_prompt = (
+                "You are a data analyst that generates custom KPIs based on user requirements. "
+                "You must output valid JSON with the following structure:\n"
+                "{\n"
+                "  \"clarifying_questions\": [\"question1\", \"question2\", ...],\n"
+                "  \"kpi\": {\n"
+                "    \"id\": \"custom_kpi\",\n"
+                "    \"name\": \"KPI Name\",\n"
+                "    \"short_description\": \"Brief description\",\n"
+                "    \"chart_type\": \"line|bar|pie|area|scatter\",\n"
+                "    \"expected_schema\": \"timeseries|categorical|distribution\",\n"
+                "    \"sql\": \"BigQuery SQL query\",\n"
+                "    \"engine\": \"vega-lite\",\n"
+                "    \"vega_lite_spec\": {vega-lite specification},\n"
+                "    \"filter_date_column\": \"date_column_name\"\n"
+                "  }\n"
+                "}\n\n"
+                "If the user hasn't provided answers to clarifying questions yet, only return the questions. "
+                "Once you have all the information needed, generate the complete KPI with SQL and chart specification. "
+                "Use BigQuery standard SQL dialect. The SQL must return columns that match the expected_schema. "
+                "For timeseries: columns should be x (DATE/TIMESTAMP) and y (NUMBER). "
+                "For categorical: columns should be label (STRING) and value (NUMBER). "
+                "For distribution: columns should be label and value. "
+                "Use table references exactly as `project.dataset.table`. "
+                "Keep SQL simple and efficient. Use safe handling for NULLs."
+            )
+            
+            # Build user prompt
+            user_prompt = json.dumps({
+                "tables": json.loads(table_info),
+                "user_description": description,
+                "clarifying_questions_asked": answers is not None,
+                "answers_provided": answers or []
+            })
+            
+            result = self.llm.generate_json(system_prompt, user_prompt)
+            
+            if not isinstance(result, dict):
+                raise Exception("Invalid response format from LLM")
+            
+            # Check if we need to ask clarifying questions
+            if "clarifying_questions" in result and result["clarifying_questions"]:
+                return {"clarifying_questions": result["clarifying_questions"]}
+            
+            # Generate the KPI
+            kpi_data = result.get("kpi", {})
+            if not kpi_data:
+                raise Exception("No KPI data generated")
+            
+            # Create table slug for the KPI ID
+            table_slug = f"{tables[0].datasetId}.{tables[0].tableId}"
+            
+            # Infer date column from schema
+            date_col = None
+            try:
+                schema = self.bq.get_table_schema(tables[0].datasetId, tables[0].tableId)
+                for c in schema:
+                    if c.get('type') in ('DATE','TIMESTAMP','DATETIME'):
+                        date_col = c['name']
+                        break
+            except Exception:
+                pass
+            
+            return KPIItem(
+                id=f"{table_slug}:custom_{uuid.uuid4().hex[:8]}",
+                name=kpi_data.get("name", "Custom KPI"),
+                short_description=kpi_data.get("short_description", description),
+                chart_type=kpi_data.get("chart_type", "bar"),
+                d3_chart=kpi_data.get("d3_chart", ""),
+                expected_schema=kpi_data.get("expected_schema", "categorical"),
+                sql=kpi_data.get("sql", ""),
+                engine=kpi_data.get("engine", "vega-lite"),
+                vega_lite_spec=kpi_data.get("vega_lite_spec"),
+                filter_date_column=kpi_data.get("filter_date_column") or date_col,
+            )
+            
+        except Exception as exc:
+            print(f"Custom KPI generation error: {exc}")
+            # Return a fallback KPI
+            table_slug = f"{tables[0].datasetId}.{tables[0].tableId}"
+            return KPIItem(
+                id=f"{table_slug}:custom_fallback_{uuid.uuid4().hex[:8]}",
+                name="Custom KPI",
+                short_description=description,
+                chart_type="bar",
+                d3_chart="",
+                expected_schema="categorical",
+                sql=f"SELECT 'Custom KPI' as label, 1 as value FROM `{tables[0].datasetId}.{tables[0].tableId}` LIMIT 1",
+                engine="vega-lite",
+                vega_lite_spec=None,
+                filter_date_column=None,
+            )
