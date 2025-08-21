@@ -17,13 +17,26 @@ class LLMClient:
         self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
     def generate_json(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
-        if self.provider == "vertex":
-            return self._generate_vertex(system_prompt, user_prompt)
-        if self.provider == "openai":
-            return self._generate_openai(system_prompt, user_prompt)
-        if self.provider == "gemini":
-            return self._generate_gemini(system_prompt, user_prompt)
-        raise RuntimeError("Unsupported LLM_PROVIDER")
+        try:
+            print(f"LLM generate_json called with provider: {self.provider}")
+            print(f"System prompt length: {len(system_prompt)}")
+            print(f"User prompt length: {len(user_prompt)}")
+            
+            if self.provider == "vertex":
+                return self._generate_vertex(system_prompt, user_prompt)
+            if self.provider == "openai":
+                return self._generate_openai(system_prompt, user_prompt)
+            if self.provider == "gemini":
+                if not self.gemini_api_key:
+                    print(f"GEMINI_API_KEY not set. Available env vars: {[k for k in os.environ.keys() if 'GEMINI' in k or 'LLM' in k]}")
+                    raise RuntimeError("GEMINI_API_KEY must be set when LLM_PROVIDER=gemini")
+                return self._generate_gemini(system_prompt, user_prompt)
+            raise RuntimeError(f"Unsupported LLM_PROVIDER: {self.provider}")
+        except Exception as exc:
+            print(f"Error in generate_json: {exc}")
+            import traceback
+            traceback.print_exc()
+            raise
 
     def _generate_vertex(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         from google.cloud import aiplatform
@@ -59,6 +72,10 @@ class LLMClient:
     def _generate_gemini(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         if not self.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY must be set when LLM_PROVIDER=gemini")
+        
+        print(f"Calling Gemini API with model: {self.gemini_model}")
+        print(f"API key length: {len(self.gemini_api_key) if self.gemini_api_key else 0}")
+        
         endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{self.gemini_model}:generateContent"
         headers = {"Content-Type": "application/json"}
         body = {
@@ -74,15 +91,36 @@ class LLMClient:
                 "responseMimeType": "application/json"
             }
         }
-        resp = requests.post(f"{endpoint}?key={self.gemini_api_key}", headers=headers, data=json.dumps(body), timeout=20)
-        if resp.status_code != 200:
-            raise RuntimeError(f"Gemini API error {resp.status_code}: {resp.text}")
-        data = resp.json()
+        
+        print(f"Making request to: {endpoint}")
+        print(f"Request body size: {len(json.dumps(body))}")
+        
         try:
-            text = data["candidates"][0]["content"]["parts"][0]["text"]
-            return self._parse_json_text(text)
+            resp = requests.post(f"{endpoint}?key={self.gemini_api_key}", headers=headers, data=json.dumps(body), timeout=20)
+            print(f"Gemini API response status: {resp.status_code}")
+            print(f"Gemini API response headers: {dict(resp.headers)}")
+            
+            if resp.status_code != 200:
+                print(f"Gemini API error response: {resp.text}")
+                raise RuntimeError(f"Gemini API error {resp.status_code}: {resp.text}")
+            
+            data = resp.json()
+            print(f"Gemini API response data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+            
+            try:
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                print(f"Extracted text from response: {text[:100]}...")
+                return self._parse_json_text(text)
+            except Exception as exc:
+                print(f"Failed to parse Gemini response structure: {data}")
+                raise RuntimeError(f"Failed to parse Gemini response: {data}") from exc
+                
+        except requests.exceptions.RequestException as req_exc:
+            print(f"Request exception: {req_exc}")
+            raise RuntimeError(f"Gemini API request failed: {req_exc}") from req_exc
         except Exception as exc:
-            raise RuntimeError(f"Failed to parse Gemini response: {data}") from exc
+            print(f"Unexpected error in Gemini API call: {exc}")
+            raise RuntimeError(f"Gemini API call failed: {exc}") from exc
 
     def edit_sql(self, original_sql: str, instruction: str) -> str:
         system = (

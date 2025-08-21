@@ -97,9 +97,25 @@ def list_tables(dataset_id: str):
 @app.post("/api/prepare", response_model=PrepareResponse)
 def prepare(req: PrepareRequest):
 	try:
-		result = kpi_service.prepare_tables(req.tables, sample_rows=req.sampleRows or 5)
+		# Convert frontend table format to backend TableRef format if needed
+		tables = []
+		for table_ref in req.tables:
+			if not hasattr(table_ref, 'projectId') or not table_ref.projectId:
+				# Create new TableRef with project ID
+				tables.append(TableRef(
+					projectId=PROJECT_ID,
+					datasetId=table_ref.datasetId,
+					tableId=table_ref.tableId
+				))
+			else:
+				tables.append(table_ref)
+		
+		result = kpi_service.prepare_tables(tables, sample_rows=req.sampleRows or 5)
 		return {"status": "ok", "prepared": result}
 	except Exception as exc:
+		print(f"Error in prepare: {exc}")
+		import traceback
+		traceback.print_exc()
 		raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -107,9 +123,26 @@ def prepare(req: PrepareRequest):
 def generate_kpis(req: GenerateKpisRequest):
 	try:
 		k = req.k or 5
-		kpis = kpi_service.generate_kpis(req.tables, k=k)
+		
+		# Convert frontend table format to backend TableRef format if needed
+		tables = []
+		for table_ref in req.tables:
+			if not hasattr(table_ref, 'projectId') or not table_ref.projectId:
+				# Create new TableRef with project ID
+				tables.append(TableRef(
+					projectId=PROJECT_ID,
+					datasetId=table_ref.datasetId,
+					tableId=table_ref.tableId
+				))
+			else:
+				tables.append(table_ref)
+		
+		kpis = kpi_service.generate_kpis(tables, k=k)
 		return {"kpis": kpis}
 	except Exception as exc:
+		print(f"Error in generate_kpis: {exc}")
+		import traceback
+		traceback.print_exc()
 		raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -121,13 +154,33 @@ def generate_custom_kpi(payload: Dict[str, Any]):
 	Returns: { kpi: KPIItem, sql: str, chart_type: str, vega_lite_spec: dict }
 	"""
 	try:
-		tables = payload.get('tables', [])
+		tables_data = payload.get('tables', [])
 		description = payload.get('description', '')
 		clarifying_questions = payload.get('clarifying_questions', [])
 		answers = payload.get('answers', [])
 		
-		if not tables or not description:
+		if not tables_data or not description:
 			raise HTTPException(status_code=400, detail="Tables and description are required")
+		
+		# Convert frontend table format to backend TableRef format
+		tables = []
+		for table_data in tables_data:
+			# Frontend sends {datasetId, tableId}, backend expects {projectId, datasetId, tableId}
+			if isinstance(table_data, dict):
+				project_id = table_data.get('projectId', PROJECT_ID)
+				dataset_id = table_data.get('datasetId')
+				table_id = table_data.get('tableId')
+				
+				if not dataset_id or not table_id:
+					raise HTTPException(status_code=400, detail="Invalid table data: missing datasetId or tableId")
+				
+				tables.append(TableRef(
+					projectId=project_id,
+					datasetId=dataset_id,
+					tableId=table_id
+				))
+			else:
+				raise HTTPException(status_code=400, detail="Invalid table data format")
 		
 		# If we have clarifying questions but no answers, return the questions
 		if clarifying_questions and not answers:
@@ -143,6 +196,9 @@ def generate_custom_kpi(payload: Dict[str, Any]):
 			"vega_lite_spec": kpi_result.vega_lite_spec
 		}
 	except Exception as exc:
+		print(f"Error in generate_custom_kpi: {exc}")
+		import traceback
+		traceback.print_exc()
 		raise HTTPException(status_code=500, detail=str(exc))
 
 
