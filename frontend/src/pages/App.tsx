@@ -69,6 +69,10 @@ export default function App() {
   const [addKpiGeneratedKpi, setAddKpiGeneratedKpi] = useState<any>(null)
   const [addKpiStep, setAddKpiStep] = useState<'description' | 'clarifying' | 'generated'>('description')
   const [addKpiEditedSql, setAddKpiEditedSql] = useState('')
+  
+  // AI Edit state
+  const [aiEditMode, setAiEditMode] = useState<'ai' | 'direct'>('ai')
+  const [directSqlInput, setDirectSqlInput] = useState('')
 
   function applyPalette(p: { primary: string; accent: string; surface: string; warn: string }) {
     const r = document.documentElement
@@ -396,6 +400,8 @@ export default function App() {
     setAiEditKpi(k)
     setAiChat([{ role: 'assistant', text: 'Let\'s refine this KPI. Tell me what you\'d like to change (chart type, labels, SQL, grouping, filters).' }])
     setAiEditOpen(true)
+    setAiEditMode('ai') // Reset to AI mode when opening
+    setDirectSqlInput(k.sql || '') // Initialize direct SQL input with current SQL
     
     // Center the modal on screen when it opens
     const centerX = Math.max(0, (window.innerWidth - 840) / 2)
@@ -526,6 +532,51 @@ export default function App() {
       }
     }
     setAiTyping(false)
+  }
+  
+  function handleDirectSqlUpdate() {
+    if (!aiEditKpi || !directSqlInput.trim()) return
+    
+    // Update the KPI with the direct SQL input
+    const updatedKpi = { ...aiEditKpi, sql: directSqlInput.trim() }
+    
+    // Try to auto-update name and description based on SQL content
+    if (directSqlInput.toLowerCase().includes('daily') && directSqlInput.toLowerCase().includes('sales')) {
+      updatedKpi.name = "Daily Sales Summary (Net Ex-Tax) and Orders"
+      updatedKpi.short_description = "Daily summary of sales metrics including orders, units, net revenue, gross margin, and average order value"
+    }
+    
+    // Auto-detect expected schema from SQL
+    if (directSqlInput.toLowerCase().includes('date(') || directSqlInput.toLowerCase().includes('order by')) {
+      updatedKpi.expected_schema = "timeseries"
+      updatedKpi.chart_type = "line"
+    } else if (directSqlInput.toLowerCase().includes('count(') || directSqlInput.toLowerCase().includes('sum(')) {
+      updatedKpi.expected_schema = "categorical"
+      updatedKpi.chart_type = "bar"
+    }
+    
+    // Auto-detect date column for filtering
+    const dateMatch = directSqlInput.match(/DATE\s*\(\s*(\w+)\s*\)/i)
+    if (dateMatch) {
+      updatedKpi.filter_date_column = dateMatch[1]
+    }
+    
+    // Update the KPI in the state
+    const idx = kpis.findIndex(x => x.id === aiEditKpi.id)
+    if (idx >= 0) {
+      const newKpis = [...kpis]
+      newKpis[idx] = updatedKpi
+      setKpis(newKpis)
+    }
+    
+    // Update the AI edit KPI reference
+    setAiEditKpi(updatedKpi)
+    
+    // Set dirty state for dashboard saving
+    setDirty(true)
+    
+    // Show success message
+    toast('success', 'KPI SQL updated successfully!')
   }
 
   const visibleKpis = kpis.filter(k => (k.tabs && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview'))
@@ -784,35 +835,253 @@ export default function App() {
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: '14px', opacity: 0.6 }}>⋮⋮</span>
-                <div className="card-title">AI Edit: {aiEditKpi?.name}</div>
+                <div className="card-title">Edit KPI: {aiEditKpi?.name}</div>
               </div>
               <div className="toolbar">
                 <button className="btn btn-sm" onClick={() => setAiEditOpen(false)}>✕</button>
               </div>
             </div>
+            
+            {/* Mode Toggle */}
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 8 }}>
+              <button 
+                className={`btn btn-sm ${aiEditMode === 'ai' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setAiEditMode('ai')}
+              >
+                AI Edit
+              </button>
+              <button 
+                className={`btn btn-sm ${aiEditMode === 'direct' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setAiEditMode('direct')}
+              >
+                Direct SQL Edit
+              </button>
+            </div>
             <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, minHeight: 0 }}>
-              <div style={{ borderRight: '1px solid var(--border)', padding: 12, overflow: 'auto' }}>
-                {aiChat.map((m, i) => (
-                  <div key={i} style={{ marginBottom: 12 }}>
-                    <div className="card-subtitle" style={{ marginBottom: 4 }}>{m.role === 'user' ? 'You' : 'Assistant'}</div>
-                    {m.role === 'assistant' ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown> : <div>{m.text}</div>}
+              {aiEditMode === 'ai' ? (
+                <>
+                  <div style={{ borderRight: '1px solid var(--border)', padding: 12, overflow: 'auto' }}>
+                    {aiChat.map((m, i) => (
+                      <div key={i} style={{ marginBottom: 12 }}>
+                        <div className="card-subtitle" style={{ marginBottom: 4 }}>{m.role === 'user' ? 'You' : 'Assistant'}</div>
+                        {m.role === 'assistant' ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown> : <div>{m.text}</div>}
+                      </div>
+                    ))}
+                    {aiTyping && (
+                      <div style={{ marginBottom: 12 }}>
+                        <div className="typing"><span className="dot"></span><span className="dot"></span><span className="dot"></span></div>
+                      </div>
+                    )}
                   </div>
-                ))}
-                {aiTyping && (
-                  <div style={{ marginBottom: 12 }}>
-                    <div className="typing"><span className="dot"></span><span className="dot"></span><span className="dot"></span></div>
+                  <div style={{ padding: 12, overflow: 'auto' }}>
+                    <div className="card-subtitle" style={{ marginBottom: 8 }}>Current KPI</div>
+                    <pre style={{ whiteSpace: 'pre-wrap' }}><code>{aiEditKpi?.sql}</code></pre>
+                    {aiEditKpi?.vega_lite_spec && <div className="card-subtitle" style={{ marginTop: 8 }}>Vega-Lite spec present</div>}
                   </div>
-                )}
-              </div>
-              <div style={{ padding: 12, overflow: 'auto' }}>
-                <div className="card-subtitle" style={{ marginBottom: 8 }}>Current KPI</div>
-                <pre style={{ whiteSpace: 'pre-wrap' }}><code>{aiEditKpi?.sql}</code></pre>
-                {aiEditKpi?.vega_lite_spec && <div className="card-subtitle" style={{ marginTop: 8 }}>Vega-Lite spec present</div>}
-              </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ padding: 12, overflow: 'auto' }}>
+                    <div className="card-subtitle" style={{ marginBottom: 8 }}>Current SQL</div>
+                    <pre style={{ whiteSpace: 'pre-wrap', fontSize: '12px', background: 'var(--surface)', padding: 8, borderRadius: 4, border: '1px solid var(--border)' }}><code>{aiEditKpi?.sql}</code></pre>
+                  </div>
+                  <div style={{ padding: 12, overflow: 'auto' }}>
+                    <div className="card-subtitle" style={{ marginBottom: 8 }}>KPI Details</div>
+                    <div style={{ marginBottom: 12 }}>
+                      <div className="card-subtitle" style={{ marginBottom: 4, fontSize: '11px' }}>Name:</div>
+                      <input 
+                        className="input" 
+                        value={aiEditKpi?.name || ''}
+                        onChange={e => setAiEditKpi(prev => prev ? { ...prev, name: e.target.value } : null)}
+                        style={{ fontSize: '12px' }}
+                      />
+                    </div>
+                    <div style={{ marginBottom: 12 }}>
+                      <div className="card-subtitle" style={{ marginBottom: 4, fontSize: '11px' }}>Description:</div>
+                      <textarea 
+                        className="input" 
+                        value={aiEditKpi?.short_description || ''}
+                        onChange={e => setAiEditKpi(prev => prev ? { ...prev, short_description: e.target.value } : null)}
+                        style={{ fontSize: '12px', minHeight: 60, resize: 'vertical' }}
+                      />
+                    </div>
+                    <div style={{ marginBottom: 12, display: 'flex', gap: 12 }}>
+                      <div style={{ flex: 1 }}>
+                        <div className="card-subtitle" style={{ marginBottom: 4, fontSize: '11px' }}>Chart Type:</div>
+                        <select 
+                          className="select" 
+                          value={aiEditKpi?.chart_type || 'bar'}
+                          onChange={e => setAiEditKpi(prev => prev ? { ...prev, chart_type: e.target.value } : null)}
+                          style={{ fontSize: '12px' }}
+                        >
+                          <option value="line">Line</option>
+                          <option value="bar">Bar</option>
+                          <option value="pie">Pie</option>
+                          <option value="area">Area</option>
+                          <option value="scatter">Scatter</option>
+                        </select>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div className="card-subtitle" style={{ marginBottom: 4, fontSize: '11px' }}>Schema:</div>
+                        <select 
+                          className="select" 
+                          value={aiEditKpi?.expected_schema || 'categorical'}
+                          onChange={e => setAiEditKpi(prev => prev ? { ...prev, expected_schema: e.target.value } : null)}
+                          style={{ fontSize: '12px' }}
+                        >
+                          <option value="timeseries">Time Series (x: date, y: number)</option>
+                          <option value="categorical">Categorical (label, value)</option>
+                          <option value="distribution">Distribution (label, value)</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div style={{ marginBottom: 12 }}>
+                      <div className="card-subtitle" style={{ marginBottom: 4, fontSize: '11px' }}>Date Column for Filtering:</div>
+                      <input 
+                        className="input" 
+                        value={aiEditKpi?.filter_date_column || ''}
+                        onChange={e => setAiEditKpi(prev => prev ? { ...prev, filter_date_column: e.target.value } : null)}
+                        placeholder="e.g., order_date"
+                        style={{ fontSize: '12px' }}
+                      />
+                      <div style={{ fontSize: '10px', color: '#666', marginTop: 2 }}>
+                        Column name used for date filtering (without DATE() wrapper)
+                      </div>
+                    </div>
+                    
+                    <div style={{ marginBottom: 12 }}>
+                      <div className="card-subtitle" style={{ marginBottom: 4, fontSize: '11px' }}>Table Reference:</div>
+                      <input 
+                        className="input" 
+                        value={(() => {
+                          const match = directSqlInput.match(/FROM\s+`([^`]+)`/i)
+                          return match ? match[1] : ''
+                        })()}
+                        onChange={e => {
+                          const newTableRef = e.target.value
+                          if (directSqlInput.includes('FROM')) {
+                            const newSql = directSqlInput.replace(/FROM\s+`[^`]+`/i, `FROM \`${newTableRef}\``)
+                            setDirectSqlInput(newSql)
+                          } else if (directSqlInput.trim()) {
+                            // If there's SQL content but no FROM clause, add one
+                            setDirectSqlInput(`${directSqlInput}\nFROM \`${newTableRef}\``)
+                          } else {
+                            // If no SQL content, create a basic query
+                            setDirectSqlInput(`SELECT * FROM \`${newTableRef}\` LIMIT 1`)
+                          }
+                        }}
+                        placeholder="project.dataset.table"
+                        style={{ fontSize: '12px' }}
+                      />
+                      <div style={{ fontSize: '10px', color: '#666', marginTop: 2 }}>
+                        BigQuery table reference (project.dataset.table)
+                      </div>
+                    </div>
+                    
+                    <div className="card-subtitle" style={{ marginBottom: 8 }}>New SQL Query</div>
+                    <textarea 
+                      className="input" 
+                      value={directSqlInput || aiEditKpi?.sql || ''}
+                      onChange={e => setDirectSqlInput(e.target.value)}
+                      placeholder="Enter your SQL query here..."
+                      style={{ 
+                        width: '100%', 
+                        minHeight: 200, 
+                        resize: 'vertical', 
+                        fontFamily: 'monospace', 
+                        fontSize: '12px',
+                        lineHeight: '1.4'
+                      }}
+                    />
+                                      <div style={{ marginTop: 8, fontSize: '12px', color: '#666', fontStyle: 'italic' }}>
+                    Enter your custom SQL query. Make sure it returns the expected schema for the chart type.
+                  </div>
+                  
+                  {/* Test SQL Button */}
+                  <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                    <button 
+                      className="btn btn-sm btn-secondary" 
+                      onClick={async () => {
+                        if (!directSqlInput.trim()) return
+                        try {
+                          const result = await api.runKpi(directSqlInput.trim(), { date: globalDate }, aiEditKpi?.filter_date_column, aiEditKpi?.expected_schema)
+                          toast('success', `SQL test successful! Query returned ${result.length} rows.`)
+                        } catch (error) {
+                          toast('error', 'SQL test failed. Please check your query syntax.')
+                        }
+                      }}
+                      disabled={!directSqlInput.trim()}
+                    >
+                      Test SQL
+                    </button>
+                    
+                    <button 
+                      className="btn btn-sm btn-secondary" 
+                      onClick={() => {
+                        // Try to extract table reference from current KPI SQL or direct input
+                        let tableRef = 'your_project.your_dataset.your_table'
+                        if (directSqlInput && directSqlInput.includes('FROM')) {
+                          const match = directSqlInput.match(/FROM\s+`([^`]+)`/i)
+                          if (match) {
+                            tableRef = match[1]
+                          }
+                        } else if (aiEditKpi?.sql) {
+                          const match = aiEditKpi.sql.match(/FROM\s+`([^`]+)`/i)
+                          if (match) {
+                            tableRef = match[1]
+                          }
+                        }
+                        
+                        const template = `-- Example: Daily sales summary with orders
+-- Table: ${tableRef}
+SELECT
+  DATE(order_date) as x,
+  COUNT(DISTINCT order_id) as orders,
+  SUM(quantity) as units,
+  SUM(net_revenue_ex_tax) as net_sales_ex_tax,
+  SUM(gross_margin) as gross_margin,
+  SAFE_DIVIDE(SUM(net_revenue_ex_tax), COUNT(DISTINCT order_id)) as avg_order_value
+FROM \`${tableRef}\`
+GROUP BY DATE(order_date)
+ORDER BY x DESC
+LIMIT 30`
+                        setDirectSqlInput(template)
+                        
+                        // Also update the KPI with detected values
+                        if (aiEditKpi) {
+                          setAiEditKpi(prev => prev ? {
+                            ...prev,
+                            name: "Daily Sales Summary (Net Ex-Tax) and Orders",
+                            short_description: "Daily summary of sales metrics including orders, units, net revenue, gross margin, and average order value",
+                            filter_date_column: 'order_date',
+                            expected_schema: 'timeseries',
+                            chart_type: 'line'
+                          } : null)
+                        }
+                      }}
+                    >
+                      Load Template
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
             <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', gap: 8, position: 'sticky', bottom: 0, background: 'var(--card)' }}>
-              <input className="input" placeholder="Describe the change..." value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyDown={e => { if (e.key==='Enter') sendAiEdit() }} style={{ flex: 1 }} />
-              <button className="btn btn-primary" onClick={sendAiEdit}>Send</button>
+              {aiEditMode === 'ai' ? (
+                <>
+                  <input className="input" placeholder="Describe the change..." value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyDown={e => { if (e.key==='Enter') sendAiEdit() }} style={{ flex: 1 }} />
+                  <button className="btn btn-primary" onClick={sendAiEdit}>Send</button>
+                </>
+              ) : (
+                <>
+                  <button className="btn btn-primary" onClick={handleDirectSqlUpdate} style={{ flex: 1 }}>
+                    Update KPI SQL
+                  </button>
+                  <button className="btn btn-secondary" onClick={() => setDirectSqlInput(aiEditKpi?.sql || '')}>
+                    Reset to Current
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
