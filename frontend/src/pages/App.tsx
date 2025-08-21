@@ -59,6 +59,16 @@ export default function App() {
   const [aiModalPosition, setAiModalPosition] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
+  
+  // Add KPI Modal state
+  const [addKpiModalOpen, setAddKpiModalOpen] = useState(false)
+  const [addKpiDescription, setAddKpiDescription] = useState('')
+  const [addKpiClarifyingQuestions, setAddKpiClarifyingQuestions] = useState<string[]>([])
+  const [addKpiAnswers, setAddKpiAnswers] = useState<string[]>([])
+  const [addKpiLoading, setAddKpiLoading] = useState(false)
+  const [addKpiGeneratedKpi, setAddKpiGeneratedKpi] = useState<any>(null)
+  const [addKpiStep, setAddKpiStep] = useState<'description' | 'clarifying' | 'generated'>('description')
+  const [addKpiEditedSql, setAddKpiEditedSql] = useState('')
 
   function applyPalette(p: { primary: string; accent: string; surface: string; warn: string }) {
     const r = document.documentElement
@@ -393,6 +403,109 @@ export default function App() {
     setAiModalPosition({ x: centerX, y: centerY })
   }
 
+  function openAddKpiModal() {
+    setAddKpiModalOpen(true)
+    setAddKpiStep('description')
+    setAddKpiDescription('')
+    setAddKpiClarifyingQuestions([])
+    setAddKpiAnswers([])
+    setAddKpiGeneratedKpi(null)
+    setAddKpiEditedSql('')
+    setAddKpiTestResult(null)
+  }
+
+  async function handleAddKpiSubmit() {
+    if (!addKpiDescription.trim() || !selected.length) return
+    
+    setAddKpiLoading(true)
+    try {
+      const result = await api.generateCustomKpi(selected, addKpiDescription.trim())
+      
+      if (result.clarifying_questions) {
+        setAddKpiClarifyingQuestions(result.clarifying_questions)
+        setAddKpiStep('clarifying')
+      } else if (result.kpi) {
+        setAddKpiGeneratedKpi(result.kpi)
+        setAddKpiStep('generated')
+      }
+    } catch (error) {
+      console.error('Failed to generate custom KPI:', error)
+      toast('error', 'Failed to generate custom KPI. Please try again.')
+    } finally {
+      setAddKpiLoading(false)
+    }
+  }
+
+  async function handleClarifyingQuestionsSubmit() {
+    if (addKpiAnswers.length !== addKpiClarifyingQuestions.length) return
+    
+    setAddKpiLoading(true)
+    try {
+      const result = await api.generateCustomKpi(selected, addKpiDescription.trim(), addKpiClarifyingQuestions, addKpiAnswers)
+      
+      if (result.kpi) {
+        setAddKpiGeneratedKpi(result.kpi)
+        setAddKpiStep('generated')
+      }
+    } catch (error) {
+      console.error('Failed to generate custom KPI:', error)
+      toast('error', 'Failed to generate custom KPI. Please try again.')
+    } finally {
+      setAddKpiLoading(false)
+    }
+  }
+
+  function handleAddKpiToCanvas() {
+    if (!addKpiGeneratedKpi) return
+    
+    // Add the generated KPI to the canvas, using edited SQL if available
+    const newKpi = {
+      ...addKpiGeneratedKpi,
+      sql: addKpiEditedSql || addKpiGeneratedKpi.sql,
+      tabs: [activeTab]
+    }
+    
+    setKpis(prev => [...prev, newKpi])
+    
+    // Add to layout
+    const newLayout = [...(tabLayouts[activeTab] || layouts)]
+    const lastKpi = newLayout[newLayout.length - 1] || { x: 0, y: 0, w: 6, h: 8 }
+    const newKpiLayout = {
+      i: newKpi.id,
+      x: (lastKpi.x + lastKpi.w) % 12,
+      y: lastKpi.y + lastKpi.h,
+      w: 6,
+      h: 8
+    }
+    
+    const updatedLayout = [...newLayout, newKpiLayout]
+    setLayouts(updatedLayout)
+    setTabLayouts(prev => ({ ...prev, [activeTab]: updatedLayout }))
+    
+    setDirty(true)
+    setAddKpiModalOpen(false)
+    toast('success', 'Custom KPI added to canvas!')
+  }
+
+  async function testAddKpiSql() {
+    if (!addKpiGeneratedKpi) return
+    
+    const sqlToTest = addKpiEditedSql || addKpiGeneratedKpi.sql
+    setAddKpiTesting(true)
+    
+    try {
+      const result = await api.runKpi(sqlToTest, { date: globalDate }, addKpiGeneratedKpi.filter_date_column, addKpiGeneratedKpi.expected_schema)
+      setAddKpiTestResult(result)
+      toast('success', 'SQL test successful!')
+    } catch (error) {
+      console.error('SQL test failed:', error)
+      toast('error', 'SQL test failed. Please check your query.')
+      setAddKpiTestResult(null)
+    } finally {
+      setAddKpiTesting(false)
+    }
+  }
+
   async function sendAiEdit() {
     if (!aiEditKpi || !aiInput.trim()) return
     const msg = aiInput.trim()
@@ -456,9 +569,14 @@ export default function App() {
                   <TableSelector datasets={datasets} onChange={setSelected} />
                 </>
               )}
-              <button className="btn btn-primary" onClick={onAnalyze} disabled={!selected.length || loading} style={{ marginTop: 8 }}>
-                {loading ? 'Analyzing...' : `Analyze (${selected.length})`}
-              </button>
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <button className="btn btn-primary" onClick={onAnalyze} disabled={!selected.length || loading}>
+                  {loading ? 'Analyzing...' : `Analyze (${selected.length})`}
+                </button>
+                <button className="btn btn-secondary" onClick={openAddKpiModal} disabled={!selected.length}>
+                  Add KPI
+                </button>
+              </div>
             </div>
             <div className="panel">
               <div className="section-title">KPI Catalog</div>
@@ -695,6 +813,204 @@ export default function App() {
             <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', gap: 8, position: 'sticky', bottom: 0, background: 'var(--card)' }}>
               <input className="input" placeholder="Describe the change..." value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyDown={e => { if (e.key==='Enter') sendAiEdit() }} style={{ flex: 1 }} />
               <button className="btn btn-primary" onClick={sendAiEdit}>Send</button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Add KPI Modal */}
+      {addKpiModalOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999 }}>
+          <div 
+            style={{ 
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: 'min(600px, 90vw)', 
+              height: 'min(70vh, 85vh)', 
+              background: 'var(--card)', 
+              border: '1px solid var(--border)', 
+              borderRadius: 12, 
+              display: 'flex', 
+              flexDirection: 'column',
+              boxShadow: 'var(--shadow)'
+            }}
+          >
+            <div 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'space-between', 
+                padding: 16, 
+                borderBottom: '1px solid var(--border)'
+              }}
+            >
+              <div className="card-title">Add Custom KPI</div>
+              <button className="btn btn-sm" onClick={() => setAddKpiModalOpen(false)}>✕</button>
+            </div>
+            
+            <div style={{ flex: 1, padding: 16, overflow: 'auto' }}>
+              {addKpiStep === 'description' && (
+                <div>
+                  <div className="card-subtitle" style={{ marginBottom: 16 }}>
+                    Describe the KPI you want to create. Be specific about what metrics, dimensions, and chart type you need.
+                  </div>
+                  <textarea 
+                    className="input" 
+                    placeholder="e.g., Show me a line chart of daily revenue over time, grouped by product category"
+                    value={addKpiDescription}
+                    onChange={e => setAddKpiDescription(e.target.value)}
+                    style={{ width: '100%', minHeight: 100, resize: 'vertical' }}
+                  />
+                  <div style={{ marginTop: 16 }}>
+                    <button 
+                      className="btn btn-primary" 
+                      onClick={handleAddKpiSubmit}
+                      disabled={!addKpiDescription.trim() || addKpiLoading}
+                    >
+                      {addKpiLoading ? 'Generating...' : 'Generate KPI'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              
+              {addKpiStep === 'clarifying' && (
+                <div>
+                  <div className="card-subtitle" style={{ marginBottom: 16 }}>
+                    Please answer these questions to help generate your KPI:
+                  </div>
+                  {addKpiClarifyingQuestions.map((question, index) => (
+                    <div key={index} style={{ marginBottom: 16 }}>
+                      <div className="card-subtitle" style={{ marginBottom: 8 }}>{question}</div>
+                      <input 
+                        className="input" 
+                        placeholder="Your answer..."
+                        value={addKpiAnswers[index] || ''}
+                        onChange={e => {
+                          const newAnswers = [...addKpiAnswers]
+                          newAnswers[index] = e.target.value
+                          setAddKpiAnswers(newAnswers)
+                        }}
+                      />
+                    </div>
+                  ))}
+                  <div style={{ marginTop: 16 }}>
+                    <button 
+                      className="btn btn-primary" 
+                      onClick={handleClarifyingQuestionsSubmit}
+                      disabled={addKpiAnswers.length !== addKpiClarifyingQuestions.length || addKpiLoading}
+                    >
+                      {addKpiLoading ? 'Generating...' : 'Generate KPI'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              
+              {addKpiStep === 'generated' && addKpiGeneratedKpi && (
+                <div>
+                  <div className="card-subtitle" style={{ marginBottom: 16 }}>
+                    Your custom KPI has been generated! Review the details below:
+                  </div>
+                  
+                  <div style={{ marginBottom: 16 }}>
+                    <div className="card-subtitle" style={{ marginBottom: 8 }}>Name</div>
+                    <div>{addKpiGeneratedKpi.name}</div>
+                  </div>
+                  
+                  <div style={{ marginBottom: 16 }}>
+                    <div className="card-subtitle" style={{ marginBottom: 8 }}>Description</div>
+                    <div>{addKpiGeneratedKpi.short_description}</div>
+                  </div>
+                  
+                  <div style={{ marginBottom: 16 }}>
+                    <div className="card-subtitle" style={{ marginBottom: 8 }}>Chart Type</div>
+                    <div>{addKpiGeneratedKpi.chart_type}</div>
+                  </div>
+                  
+                  <div style={{ marginBottom: 16 }}>
+                    <div className="card-subtitle" style={{ marginBottom: 8 }}>SQL Query</div>
+                    <div style={{ marginBottom: 8 }}>
+                      <textarea 
+                        className="input" 
+                        value={addKpiEditedSql || addKpiGeneratedKpi.sql}
+                        onChange={e => setAddKpiEditedSql(e.target.value)}
+                        style={{ width: '100%', minHeight: 120, resize: 'vertical', fontFamily: 'monospace', fontSize: '12px' }}
+                        placeholder="Edit SQL query here..."
+                      />
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#666', fontStyle: 'italic' }}>
+                      You can edit the SQL query above before adding it to the canvas.
+                    </div>
+                    
+                    {addKpiTestResult && (
+                      <div style={{ marginTop: 16, padding: 12, background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)' }}>
+                        <div className="card-subtitle" style={{ marginBottom: 8 }}>Test Results</div>
+                        <div style={{ fontSize: '12px', color: '#666' }}>
+                          Query returned {addKpiTestResult.length} rows
+                        </div>
+                        {addKpiTestResult.length > 0 && (
+                          <div style={{ marginTop: 8 }}>
+                            <div className="card-subtitle" style={{ marginBottom: 4, fontSize: '11px' }}>Sample Data:</div>
+                            <pre style={{ fontSize: '10px', overflow: 'auto', maxHeight: '100px' }}>
+                              {JSON.stringify(addKpiTestResult.slice(0, 3), null, 2)}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div style={{ marginBottom: 16 }}>
+                    <div className="card-subtitle" style={{ marginBottom: 8 }}>Actions</div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button 
+                        className="btn btn-sm" 
+                        onClick={() => window.alert(addKpiGeneratedKpi.sql)}
+                        title="View SQL in alert"
+                      >
+                        View SQL
+                      </button>
+                      <button 
+                        className="btn btn-sm" 
+                        onClick={() => {
+                          const newWindow = window.open('', '_blank')
+                          if (newWindow) {
+                            newWindow.document.write(`
+                              <html>
+                                <head><title>SQL Query</title></head>
+                                <body>
+                                  <pre style="font-family: monospace; padding: 20px;">${addKpiGeneratedKpi.sql}</pre>
+                                </body>
+                              </html>
+                            `)
+                          }
+                        }}
+                        title="Open SQL in new window"
+                      >
+                        Open SQL
+                      </button>
+                      <button 
+                        className="btn btn-sm" 
+                        onClick={testAddKpiSql}
+                        disabled={addKpiTesting}
+                        title="Test the SQL query"
+                      >
+                        {addKpiTesting ? 'Testing...' : 'Test SQL'}
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+                    <button className="btn btn-primary" onClick={handleAddKpiToCanvas}>
+                      Add to Canvas
+                    </button>
+                    <button className="btn btn-secondary" onClick={() => setAddKpiStep('description')}>
+                      Start Over
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
