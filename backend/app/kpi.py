@@ -21,6 +21,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     "- The SQL MUST return columns aliased exactly as required by expected_schema: for timeseries use x,y; for categorical use label,value; for distribution use label,value.\n"
     "- Only reference columns that exist in the provided schema. Use exact column names (case-sensitive as listed). If a desired KPI is not feasible with the schema, skip it.\n"
     "- Prefer efficient queries. Use COALESCE to handle NULLs. Use LIMIT for categorical Top-N (e.g., 10). Avoid SELECT *.\n"
+    "- Always use SAFE_DIVIDE(numerator, denominator) for any ratio or percentage; never use bare '/' division. This prevents division-by-zero errors.\n"
     "- If a date or timestamp column exists, include at least two time-series KPIs that show trend and growth.\n"
     "- If numeric measures exist, include growth/velocity (MoM/YoY) and rolling averages (e.g., 7d/28d).\n"
     "- If categorical dimensions exist, include contribution mix (Top-N by value) and concentration (share of top categories).\n"
@@ -53,6 +54,7 @@ CROSS_SYSTEM_PROMPT_TEMPLATE = (
     "- Only JOIN when a valid key exists in both tables (e.g., *_id, id, keys with matching semantics).\n"
     "- Ensure SQL aliases match expected_schema: timeseries -> x,y; categorical -> label,value; distribution -> label,value.\n"
     "- Prefer efficient aggregations; avoid SELECT *. Use COALESCE for NULLs.\n"
+    "- Always use SAFE_DIVIDE(numerator, denominator) for ratios/percentages; never use bare '/' division.\n"
     "- If time columns exist, create trend and growth KPIs. Otherwise focus on categorical contribution and distributions.\n\n"
     "Examples to consider (only if schema supports them):\n"
     "- Revenue (or key measure) by product/category/region/channel (JOIN fact to dimension).\n"
@@ -337,7 +339,7 @@ class KPIService:
                 "For categorical: columns should be label (STRING) and value (NUMBER). "
                 "For distribution: columns should be label and value. "
                 "Use table references exactly as `project.dataset.table`. "
-                "Keep SQL simple and efficient. Use safe handling for NULLs."
+                "Keep SQL simple and efficient. Use safe handling for NULLs. Always use SAFE_DIVIDE(numerator, denominator) for ratios/percentages to avoid division-by-zero; never use bare '/' division."
             )
             
             # Build user prompt
