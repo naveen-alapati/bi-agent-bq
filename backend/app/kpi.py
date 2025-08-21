@@ -11,17 +11,56 @@ from .llm import LLMClient
 
 
 SYSTEM_PROMPT_TEMPLATE = (
-    "You are a data analyst that only outputs JSON (no commentary). Use BigQuery SQL standard dialect. "
-    "The user wants the Top {k} KPIs for the dataset/table(s) described below. For each KPI produce: "
-    "- id (short slug), - name, - short_description (1 sentence), - chart_type (one of: line, bar, pie, area, scatter), "
-    "- d3_chart (a short suggestion: e.g. \"d3.line() with x=date, y=value\", or \"d3.bar() with label,value\"), "
-    "- expected_schema (one of: timeseries {{x:DATE|TIMESTAMP or STRING, y:NUMBER}}, categorical {{label:STRING, value:NUMBER}}, distribution {{label, value}}), "
-    "- sql (BigQuery standard SQL) — this SQL must be ready-to-run and must return columns that match expected_schema. "
-    "- Prefer engine='vega-lite' and provide vega_lite_spec that uses data: {{values: []}} and encodes fields x/y or label/value accordingly. "
-    "Use the table reference exactly as `project.dataset.table`. If using aggregation, alias columns exactly to x,y or label,value depending on expected_schema. "
-    "Keep SQL simple and efficient (use LIMIT where useful). Use safe handling for NULLs. "
-    "INPUT_DATA is a JSON object. "
-    "Return value: JSON object: {{ \"kpis\": [ {{id, name, short_description, chart_type, d3_chart, expected_schema, sql, engine?, vega_lite_spec? }} , ... ] }}"
+    "You are a seasoned enterprise data analyst with 20 years of experience. Output JSON only (no commentary). "
+    "Use BigQuery SQL (Standard SQL). The user wants the Top {k} high-impact KPIs for the dataset/table(s) described below. "
+    "Your KPIs should be decision-grade (not vanity metrics) and help executives understand performance, growth, efficiency, and risk.\n\n"
+    "Rules for each KPI you produce:\n"
+    "- Provide fields: id (short slug), name, short_description (1 sentence), chart_type (line|bar|pie|area|scatter), d3_chart (short hint),\n"
+    "  expected_schema (one of: timeseries {x:DATE|TIMESTAMP or STRING, y:NUMBER}, categorical {label:STRING, value:NUMBER}, distribution {label, value}),\n"
+    "  sql (ready-to-run BigQuery SQL), engine ('vega-lite'), vega_lite_spec (valid spec with data:{values: []}), and filter_date_column when applicable.\n"
+    "- The SQL MUST return columns aliased exactly as required by expected_schema: for timeseries use x,y; for categorical use label,value; for distribution use label,value.\n"
+    "- Only reference columns that exist in the provided schema. Use exact column names (case-sensitive as listed). If a desired KPI is not feasible with the schema, skip it.\n"
+    "- Prefer efficient queries. Use COALESCE to handle NULLs. Use LIMIT for categorical Top-N (e.g., 10). Avoid SELECT *.\n"
+    "- If a date or timestamp column exists, include at least two time-series KPIs that show trend and growth.\n"
+    "- If numeric measures exist, include growth/velocity (MoM/YoY) and rolling averages (e.g., 7d/28d).\n"
+    "- If categorical dimensions exist, include contribution mix (Top-N by value) and concentration (share of top categories).\n"
+    "- Where feasible, surface risk/quality (e.g., anomaly scores via z-score on daily totals) as a time-series y value.\n"
+    "- For distribution, produce a histogram-like bucketization or percentile summary as label/value pairs.\n\n"
+    "Guidance for mapping schema to KPIs:\n"
+    "- Identify one primary date column if present (name hints: date, dt, created_at, updated_at, timestamp). Use it as filter_date_column and timeseries x.\n"
+    "- Identify numeric measure columns (names often include amount, revenue, cost, price, qty, count, score, duration).\n"
+    "- Identify categorical dimensions (e.g., country, region, product, segment, channel, status).\n\n"
+    "Examples of strong enterprise KPIs to consider (only if supported by schema):\n"
+    "- Timeseries trend of total records or sum of a key numeric measure with 7d rolling average.\n"
+    "- MoM or YoY growth of a key measure (e.g., revenue, count). Use same-period-last-year comparison when a year of data is present.\n"
+    "- Top 10 categories by contribution (e.g., product, country) measured by sum(amount) or count(*).\n"
+    "- Concentration metric: share of Top 3 categories vs total (as categorical rows).\n"
+    "- Distribution of a numeric measure using buckets (e.g., price ranges) or selected percentiles as label/value pairs.\n"
+    "- Anomaly indicator: daily z-score of total count or sum(amount) as y (higher absolute values indicate anomalies).\n\n"
+    "Vega-Lite guidance:\n"
+    "- timeseries: line or area chart with x mapped to 'x' (temporal when date/timestamp) and y to 'y'.\n"
+    "- categorical: bar chart with x='label', y='value', sort by '-value'.\n"
+    "- distribution: bar chart with x='label', y='value' or appropriate encoding.\n\n"
+    "INPUT_DATA is a JSON object.\n"
+    "Return value: JSON object: { \"kpis\": [ {id, name, short_description, chart_type, d3_chart, expected_schema, sql, engine, vega_lite_spec, filter_date_column? }, ... ] }"
+)
+
+CROSS_SYSTEM_PROMPT_TEMPLATE = (
+    "You are a seasoned enterprise data analyst. Output JSON only. Use BigQuery Standard SQL.\n\n"
+    "Goal: Propose up to {k} high-impact cross-table KPIs using JOINS between the provided tables. Favor fact tables joined to dimension tables.\n\n"
+    "Strict requirements:\n"
+    "- Only use columns that exist in the provided schemas. Use exact, fully-qualified table references as `project.dataset.table`.\n"
+    "- Only JOIN when a valid key exists in both tables (e.g., *_id, id, keys with matching semantics).\n"
+    "- Ensure SQL aliases match expected_schema: timeseries -> x,y; categorical -> label,value; distribution -> label,value.\n"
+    "- Prefer efficient aggregations; avoid SELECT *. Use COALESCE for NULLs.\n"
+    "- If time columns exist, create trend and growth KPIs. Otherwise focus on categorical contribution and distributions.\n\n"
+    "Examples to consider (only if schema supports them):\n"
+    "- Revenue (or key measure) by product/category/region/channel (JOIN fact to dimension).\n"
+    "- Conversion rate or average order value requiring measures and dimensional attributes.\n"
+    "- Customer mix: Top 10 segments by contribution.\n"
+    "- Retention/repurchase rate by cohort (if dates and customer_id exist).\n"
+    "- On-time vs delayed (if status/dates exist).\n\n"
+    "Output JSON shape: { \"kpis\": [ {id, name, short_description, chart_type, d3_chart, expected_schema, sql, engine, vega_lite_spec, filter_date_column?}, ... ] }\n"
 )
 
 
@@ -129,8 +168,40 @@ class KPIService:
         # Deprecated for prod; kept behind flag for debugging
         return []
 
+    def _score_table_for_primary(self, table: TableRef) -> int:
+        score = 0
+        name = table.tableId.lower()
+        if "fact" in name or "fct" in name:
+            score += 10
+        if name.startswith("dim_") or name.startswith("dim") or name.startswith("d_"):
+            score -= 3
+        try:
+            schema = self.bq.get_table_schema(table.datasetId, table.tableId)
+        except Exception:
+            schema = []
+        numeric_types = {"INT64", "FLOAT64", "NUMERIC", "BIGNUMERIC"}
+        num_numeric_cols = sum(1 for c in schema if (c.get("type") or "").upper() in numeric_types)
+        score += min(5, num_numeric_cols)
+        return score
+
+    def _select_primary_table(self, tables: List[TableRef]) -> TableRef:
+        if not tables:
+            raise ValueError("No tables provided")
+        return max(tables, key=self._score_table_for_primary)
+
+    def _infer_date_col_from_schema(self, dataset_id: str, table_id: str) -> str:
+        try:
+            schema = self.bq.get_table_schema(dataset_id, table_id)
+            for c in schema:
+                if c.get('type') in ('DATE','TIMESTAMP','DATETIME'):
+                    return c['name']
+        except Exception:
+            return None
+        return None
+
     def generate_kpis(self, tables: List[TableRef], k: int = 5) -> List[KPIItem]:
         all_items: List[KPIItem] = []
+        # Per-table KPIs (existing behavior)
         for t in tables:
             try:
                 system_prompt = SYSTEM_PROMPT_TEMPLATE.format(k=k)
@@ -144,15 +215,7 @@ class KPIService:
                 continue
             table_slug = f"{t.datasetId}.{t.tableId}"
             # Attempt to infer a reasonable date column from schema for filtering
-            date_col = None
-            try:
-                schema = self.bq.get_table_schema(t.datasetId, t.tableId)
-                for c in schema:
-                    if c.get('type') in ('DATE','TIMESTAMP','DATETIME'):
-                        date_col = c['name']
-                        break
-            except Exception:
-                pass
+            date_col = self._infer_date_col_from_schema(t.datasetId, t.tableId)
             count = 0
             for item in (result.get("kpis") or []):
                 if count >= k:
@@ -162,6 +225,8 @@ class KPIService:
                 if not sql or not expected_schema:
                     continue
                 slug = item.get("id", f"kpi_{count+1}")
+                # Ensure timeseries can be filtered by date: default to 'x' which is the date alias
+                filter_col = item.get("filter_date_column") or ("x" if expected_schema.startswith("timeseries") else date_col)
                 all_items.append(
                     KPIItem(
                         id=f"{table_slug}:{slug}",
@@ -173,10 +238,48 @@ class KPIService:
                         sql=sql,
                         engine=item.get("engine", "vega-lite" if item.get("vega_lite_spec") else "vega-lite"),
                         vega_lite_spec=item.get("vega_lite_spec"),
-                        filter_date_column=item.get("filter_date_column") or date_col,
+                        filter_date_column=filter_col,
                     )
                 )
                 count += 1
+        # Cross-table KPIs (new behavior)
+        if len(tables) >= 2:
+            try:
+                primary = self._select_primary_table(tables)
+                primary_slug = f"{primary.datasetId}.{primary.tableId}"
+                system_prompt = CROSS_SYSTEM_PROMPT_TEMPLATE.format(k=max(1, min(k, 7)))
+                user_prompt = self._build_input_json(tables)
+                cross_result = self.llm.generate_json(system_prompt, user_prompt)
+                # Attempt to infer date column from primary; default to 'x' for timeseries
+                primary_date_col = self._infer_date_col_from_schema(primary.datasetId, primary.tableId)
+                count = 0
+                for item in (cross_result.get("kpis") or []):
+                    if count >= k:
+                        break
+                    sql = item.get("sql", "")
+                    expected_schema = item.get("expected_schema", "")
+                    if not sql or not expected_schema:
+                        continue
+                    base_slug = item.get("id", f"cross_{count+1}")
+                    slug = f"cross_{base_slug}"
+                    filter_col = item.get("filter_date_column") or ("x" if expected_schema.startswith("timeseries") else primary_date_col)
+                    all_items.append(
+                        KPIItem(
+                            id=f"{primary_slug}:{slug}",
+                            name=item.get("name", "KPI"),
+                            short_description=item.get("short_description", ""),
+                            chart_type=item.get("chart_type", "bar"),
+                            d3_chart=item.get("d3_chart", ""),
+                            expected_schema=expected_schema,
+                            sql=sql,
+                            engine=item.get("engine", "vega-lite" if item.get("vega_lite_spec") else "vega-lite"),
+                            vega_lite_spec=item.get("vega_lite_spec"),
+                            filter_date_column=filter_col,
+                        )
+                    )
+                    count += 1
+            except Exception as exc:
+                print(f"Cross-table KPI generation error: {exc}")
         if not all_items:
             # Return empty list rather than raising, to avoid 500 and let UI handle gracefully
             return []
