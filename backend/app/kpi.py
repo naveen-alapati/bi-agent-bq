@@ -24,8 +24,8 @@ SYSTEM_PROMPT_TEMPLATE = (
     "- If a date or timestamp column exists, include at least two time-series KPIs that show trend and growth.\n"
     "- If numeric measures exist, include growth/velocity (MoM/YoY) and rolling averages (e.g., 7d/28d).\n"
     "- If categorical dimensions exist, include contribution mix (Top-N by value) and concentration (share of top categories).\n"
-    "- Where feasible, surface risk/quality (e.g., anomaly scores via z-score on daily totals) as a time-series y value.\n"
-    "- For distribution, produce a histogram-like bucketization or percentile summary as label/value pairs.\n\n"
+    "- Where feasible, surface risk/quality (e.g., anomaly scores via z-score on daily totals) as a time-series y value.\n\n"
+    "For distribution, produce a histogram-like bucketization or percentile summary as label/value pairs.\n\n"
     "Guidance for mapping schema to KPIs:\n"
     "- Identify one primary date column if present (name hints: date, dt, created_at, updated_at, timestamp). Use it as filter_date_column and timeseries x.\n"
     "- Identify numeric measure columns (names often include amount, revenue, cost, price, qty, count, score, duration).\n"
@@ -199,6 +199,25 @@ class KPIService:
             return None
         return None
 
+    def _normalize_expected_schema(self, expected: Any) -> str:
+        """Return a normalized expected_schema string from various shapes or dicts."""
+        try:
+            if isinstance(expected, str):
+                return expected
+            if isinstance(expected, dict):
+                schema_type = expected.get("type")
+                if isinstance(schema_type, str):
+                    return schema_type
+                lowered_keys = {str(k).lower() for k in expected.keys()}
+                if {"x", "y"}.issubset(lowered_keys):
+                    return "timeseries"
+                if {"label", "value"}.issubset(lowered_keys):
+                    return "categorical"
+                return ""
+            return ""
+        except Exception:
+            return ""
+
     def generate_kpis(self, tables: List[TableRef], k: int = 5) -> List[KPIItem]:
         all_items: List[KPIItem] = []
         # Per-table KPIs (existing behavior)
@@ -221,12 +240,12 @@ class KPIService:
                 if count >= k:
                     break
                 sql = item.get("sql", "")
-                expected_schema = item.get("expected_schema", "")
+                expected_schema = self._normalize_expected_schema(item.get("expected_schema", ""))
                 if not sql or not expected_schema:
                     continue
                 slug = item.get("id", f"kpi_{count+1}")
                 # Ensure timeseries can be filtered by date: default to 'x' which is the date alias
-                filter_col = item.get("filter_date_column") or ("x" if expected_schema.startswith("timeseries") else date_col)
+                filter_col = item.get("filter_date_column") or ("x" if isinstance(expected_schema, str) and expected_schema.startswith("timeseries") else date_col)
                 all_items.append(
                     KPIItem(
                         id=f"{table_slug}:{slug}",
@@ -257,12 +276,12 @@ class KPIService:
                     if count >= k:
                         break
                     sql = item.get("sql", "")
-                    expected_schema = item.get("expected_schema", "")
+                    expected_schema = self._normalize_expected_schema(item.get("expected_schema", ""))
                     if not sql or not expected_schema:
                         continue
                     base_slug = item.get("id", f"cross_{count+1}")
                     slug = f"cross_{base_slug}"
-                    filter_col = item.get("filter_date_column") or ("x" if expected_schema.startswith("timeseries") else primary_date_col)
+                    filter_col = item.get("filter_date_column") or ("x" if isinstance(expected_schema, str) and expected_schema.startswith("timeseries") else primary_date_col)
                     all_items.append(
                         KPIItem(
                             id=f"{primary_slug}:{slug}",
@@ -363,7 +382,7 @@ class KPIService:
                 short_description=kpi_data.get("short_description", description),
                 chart_type=kpi_data.get("chart_type", "bar"),
                 d3_chart=kpi_data.get("d3_chart", ""),
-                expected_schema=kpi_data.get("expected_schema", "categorical"),
+                expected_schema=self._normalize_expected_schema(kpi_data.get("expected_schema", "categorical")),
                 sql=kpi_data.get("sql", ""),
                 engine=kpi_data.get("engine", "vega-lite"),
                 vega_lite_spec=kpi_data.get("vega_lite_spec"),
