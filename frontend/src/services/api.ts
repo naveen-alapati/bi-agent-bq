@@ -54,6 +54,11 @@ export const api = {
     return r.data as { reply: string; kpi?: any }
   },
 
+  async generateCustomKpi(tables: {datasetId: string, tableId: string}[], description: string, clarifyingQuestions?: string[], answers?: string[]) {
+    const r = await axios.post('/api/generate_custom_kpi', { tables, description, clarifying_questions: clarifyingQuestions, answers })
+    return r.data
+  },
+
   async getMostRecentDashboard() {
     const r = await axios.get('/api/dashboards/most-recent')
     return r.data.id as string | null

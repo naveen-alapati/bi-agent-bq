@@ -113,6 +113,39 @@ def generate_kpis(req: GenerateKpisRequest):
 		raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.post("/api/generate_custom_kpi")
+def generate_custom_kpi(payload: Dict[str, Any]):
+	"""
+	Generate a custom KPI based on user description and selected tables.
+	Body: { tables: List[TableRef], description: str, clarifying_questions?: List[str], answers?: List[str] }
+	Returns: { kpi: KPIItem, sql: str, chart_type: str, vega_lite_spec: dict }
+	"""
+	try:
+		tables = payload.get('tables', [])
+		description = payload.get('description', '')
+		clarifying_questions = payload.get('clarifying_questions', [])
+		answers = payload.get('answers', [])
+		
+		if not tables or not description:
+			raise HTTPException(status_code=400, detail="Tables and description are required")
+		
+		# If we have clarifying questions but no answers, return the questions
+		if clarifying_questions and not answers:
+			return {"clarifying_questions": clarifying_questions}
+		
+		# Generate the custom KPI
+		kpi_result = kpi_service.generate_custom_kpi(tables, description, answers)
+		
+		return {
+			"kpi": kpi_result,
+			"sql": kpi_result.sql,
+			"chart_type": kpi_result.chart_type,
+			"vega_lite_spec": kpi_result.vega_lite_spec
+		}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.post("/api/run_kpi", response_model=RunKpiResponse)
 def run_kpi(req: RunKpiRequest):
 	try:
