@@ -121,40 +121,21 @@ def generate_custom_kpi(payload: Dict[str, Any]):
 	Returns: { kpi: KPIItem, sql: str, chart_type: str, vega_lite_spec: dict }
 	"""
 	try:
-		raw_tables = payload.get('tables') or []
-		description = payload.get('description') or ''
-		clarifying_questions = payload.get('clarifying_questions') or []
-		answers = payload.get('answers')
+		tables = payload.get('tables', [])
+		description = payload.get('description', '')
+		clarifying_questions = payload.get('clarifying_questions', [])
+		answers = payload.get('answers', [])
 		
-		if not raw_tables or not description:
+		if not tables or not description:
 			raise HTTPException(status_code=400, detail="Tables and description are required")
 		
-		# Normalize incoming tables to TableRef objects
-		tables: List[TableRef] = []
-		for t in raw_tables:
-			if isinstance(t, dict):
-				ds = t.get('datasetId')
-				tb = t.get('tableId')
-				if not ds or not tb:
-					raise HTTPException(status_code=400, detail="Each table must include datasetId and tableId")
-				tables.append(TableRef(datasetId=ds, tableId=tb))
-			elif isinstance(t, TableRef):
-				tables.append(t)
-			else:
-				raise HTTPException(status_code=400, detail="Invalid table reference format")
-		
-		# If we have clarifying questions but no answers, return the questions as-is
+		# If we have clarifying questions but no answers, return the questions
 		if clarifying_questions and not answers:
 			return {"clarifying_questions": clarifying_questions}
 		
 		# Generate the custom KPI
 		kpi_result = kpi_service.generate_custom_kpi(tables, description, answers)
 		
-		# If the service indicates clarifying questions are needed, forward them
-		if isinstance(kpi_result, dict) and kpi_result.get('clarifying_questions'):
-			return {"clarifying_questions": kpi_result.get('clarifying_questions')}
-		
-		# Otherwise return the generated KPI
 		return {
 			"kpi": kpi_result,
 			"sql": kpi_result.sql,
