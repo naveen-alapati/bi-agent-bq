@@ -16,8 +16,8 @@ SYSTEM_PROMPT_TEMPLATE = (
     "Your KPIs should be decision-grade (not vanity metrics) and help executives understand performance, growth, efficiency, and risk.\n\n"
     "Rules for each KPI you produce:\n"
     "- Provide fields: id (short slug), name, short_description (1 sentence), chart_type (line|bar|pie|area|scatter), d3_chart (short hint),\n"
-    "  expected_schema (one of: timeseries {x:DATE|TIMESTAMP or STRING, y:NUMBER}, categorical {label:STRING, value:NUMBER}, distribution {label, value}),\n"
-    "  sql (ready-to-run BigQuery SQL), engine ('vega-lite'), vega_lite_spec (valid spec with data:{values: []}), and filter_date_column when applicable.\n"
+    "  expected_schema (one of: timeseries {{x:DATE|TIMESTAMP or STRING, y:NUMBER}}, categorical {{label:STRING, value:NUMBER}}, distribution {{label, value}}),\n"
+    "  sql (ready-to-run BigQuery SQL), engine ('vega-lite'), vega_lite_spec (valid spec with data:{{values: []}}), and filter_date_column when applicable.\n"
     "- The SQL MUST return columns aliased exactly as required by expected_schema: for timeseries use x,y; for categorical use label,value; for distribution use label,value.\n"
     "- Only reference columns that exist in the provided schema. Use exact column names (case-sensitive as listed). If a desired KPI is not feasible with the schema, skip it.\n"
     "- Prefer efficient queries. Use COALESCE to handle NULLs. Use LIMIT for categorical Top-N (e.g., 10). Avoid SELECT *.\n"
@@ -42,7 +42,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     "- categorical: bar chart with x='label', y='value', sort by '-value'.\n"
     "- distribution: bar chart with x='label', y='value' or appropriate encoding.\n\n"
     "INPUT_DATA is a JSON object.\n"
-    "Return value: JSON object: { \"kpis\": [ {id, name, short_description, chart_type, d3_chart, expected_schema, sql, engine, vega_lite_spec, filter_date_column? }, ... ] }"
+    "Return value: JSON object: {{ \"kpis\": [ {{id, name, short_description, chart_type, d3_chart, expected_schema, sql, engine, vega_lite_spec, filter_date_column? }} , ... ] }}"
 )
 
 CROSS_SYSTEM_PROMPT_TEMPLATE = (
@@ -60,7 +60,7 @@ CROSS_SYSTEM_PROMPT_TEMPLATE = (
     "- Customer mix: Top 10 segments by contribution.\n"
     "- Retention/repurchase rate by cohort (if dates and customer_id exist).\n"
     "- On-time vs delayed (if status/dates exist).\n\n"
-    "Output JSON shape: { \"kpis\": [ {id, name, short_description, chart_type, d3_chart, expected_schema, sql, engine, vega_lite_spec, filter_date_column?}, ... ] }\n"
+    "Output JSON shape: {{ \"kpis\": [ {{id, name, short_description, chart_type, d3_chart, expected_schema, sql, engine, vega_lite_spec, filter_date_column?}}, ... ] }}\n"
 )
 
 
