@@ -26,20 +26,11 @@ export function KPIDraftsModal({ open, tables, drafts, globalDate, onClose, onFi
   const [issuesById, setIssuesById] = useState<Record<string, { type: string; message: string }[]>>({})
   const [aiInputById, setAiInputById] = useState<Record<string, string>>({})
   const [aiChatById, setAiChatById] = useState<Record<string, { role: 'assistant'|'user'; text: string }[]>>({})
-  const [aiOpenById, setAiOpenById] = useState<Record<string, boolean>>({})
-  const [aiTypingById, setAiTypingById] = useState<Record<string, boolean>>({})
-  const [originalById, setOriginalById] = useState<Record<string, Draft>>({})
 
   useEffect(() => {
-    const cloned = (drafts || []).map((d: any) => ({ ...d }))
-    setItems(cloned)
+    setItems((drafts || []).map((d: any) => ({ ...d })))
     setSelectedIds(new Set((drafts || []).map((d: any) => d.id)))
     setIssuesById({})
-    // capture originals for restore/modified tracking
-    const originals: Record<string, Draft> = {}
-    for (const d of cloned) originals[d.id] = { ...d }
-    setOriginalById(originals)
-    setAiOpenById({})
   }, [drafts, open])
 
   const filtered = useMemo(() => {
@@ -53,16 +44,6 @@ export function KPIDraftsModal({ open, tables, drafts, globalDate, onClose, onFi
     ))
   }, [items, search])
 
-  function isModifiedAgainstOriginal(id: string, candidate: Draft) {
-    const orig = originalById[id]
-    if (!orig) return false
-    const keys = ['name','sql','chart_type','expected_schema','filter_date_column']
-    for (const k of keys) {
-      if ((orig as any)[k] !== (candidate as any)[k]) return true
-    }
-    return false
-  }
-
   function toggleSelect(id: string) {
     setSelectedIds(prev => {
       const next = new Set(prev)
@@ -73,12 +54,7 @@ export function KPIDraftsModal({ open, tables, drafts, globalDate, onClose, onFi
   }
 
   function updateItem(id: string, patch: Partial<Draft>) {
-    setItems(prev => prev.map(it => {
-      if (it.id !== id) return it
-      const next = { ...it, ...patch }
-      const modified = isModifiedAgainstOriginal(id, next)
-      return { ...next, _modified: modified }
-    }))
+    setItems(prev => prev.map(it => it.id === id ? { ...it, ...patch } : it))
   }
 
   async function validateSelected() {
@@ -97,13 +73,6 @@ export function KPIDraftsModal({ open, tables, drafts, globalDate, onClose, onFi
     }
   }
 
-  async function validateOne(it: Draft) {
-    try {
-      const [r] = await apiClient.kpiDraftsValidate(tables, [it])
-      setIssuesById(prev => ({ ...prev, [it.id]: (r && r.issues) || [] }))
-    } catch {}
-  }
-
   async function testSql(it: Draft) {
     setTestingById(prev => ({ ...prev, [it.id]: true }))
     try {
@@ -118,50 +87,23 @@ export function KPIDraftsModal({ open, tables, drafts, globalDate, onClose, onFi
     }
   }
 
-  function toggleAi(it: Draft) {
-    setAiOpenById(prev => ({ ...prev, [it.id]: !prev[it.id] }))
-    const history = aiChatById[it.id] || []
-    if (!history.length) {
-      setAiChatById(prev => ({
-        ...prev,
-        [it.id]: [{ role: 'assistant', text: "Let's refine this KPI. Tell me what you'd like to change (chart type, labels, SQL, grouping, filters)." }]
-      }))
-    }
-  }
-
   async function sendAi(it: Draft) {
     const text = (aiInputById[it.id] || '').trim()
     if (!text) return
     const history = aiChatById[it.id] || []
     setAiChatById(prev => ({ ...prev, [it.id]: [...history, { role: 'user', text }] }))
     setAiInputById(prev => ({ ...prev, [it.id]: '' }))
-    setAiTypingById(prev => ({ ...prev, [it.id]: true }))
     try {
       const res = await apiClient.editKpiChat(it, text, history.map(m => ({ role: m.role, content: m.text })))
       if (res.reply) setAiChatById(prev => ({ ...prev, [it.id]: [...(prev[it.id] || []), { role: 'assistant', text: res.reply }] }))
-      if (res.kpi) {
-        const updated = { ...it, ...res.kpi }
-        updateItem(it.id, { ...res.kpi })
-        await validateOne(updated)
-      }
+      if (res.kpi) updateItem(it.id, { ...res.kpi })
     } catch (e: any) {
       alert(`AI error: ${e?.message || e}`)
-    } finally {
-      setAiTypingById(prev => ({ ...prev, [it.id]: false }))
     }
   }
 
-  function restoreOriginal(id: string) {
-    const orig = originalById[id]
-    if (!orig) return
-    setItems(prev => prev.map(it => it.id === id ? { ...orig, _modified: false } : it))
-    setIssuesById(prev => ({ ...prev, [id]: [] }))
-    setAiChatById(prev => ({ ...prev, [id]: [] }))
-    setAiInputById(prev => ({ ...prev, [id]: '' }))
-  }
-
   async function finalizeSelected() {
-    const toFinalize = items.filter(it => selectedIds.has(it.id) && !it._removed)
+    const toFinalize = items.filter(it => selectedIds.has(it.id))
     if (!toFinalize.length) return
     setFinalizing(true)
     try {
@@ -223,9 +165,6 @@ export function KPIDraftsModal({ open, tables, drafts, globalDate, onClose, onFi
                       {conf !== undefined && (
                         <span className="chip" title="Confidence score" style={{ background: confColor, color: '#fff' }}>{Math.round(conf * 100)}%</span>
                       )}
-                      {it._modified && (
-                        <span className="tag" title="Modified">Modified</span>
-                      )}
                     </div>
                     <div className="card-subtitle" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                       <span>{tablePrefix}</span>
@@ -247,8 +186,6 @@ export function KPIDraftsModal({ open, tables, drafts, globalDate, onClose, onFi
                   <div className="card-actions">
                     <button className="btn btn-sm" onClick={() => testSql(it)} disabled={!!testingById[it.id]}>{testingById[it.id] ? 'Testing...' : 'Test SQL'}</button>
                     <button className="btn btn-sm" onClick={() => updateItem(it.id, { _removed: true })}>Remove</button>
-                    <button className="btn btn-sm" onClick={() => toggleAi(it)}>{aiOpenById[it.id] ? 'Hide AI' : 'AI Edit'}</button>
-                    <button className="btn btn-sm" onClick={() => restoreOriginal(it.id)} disabled={!it._modified}>Restore Original</button>
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -258,34 +195,28 @@ export function KPIDraftsModal({ open, tables, drafts, globalDate, onClose, onFi
                     {hasErrors && (
                       <div style={{ marginTop: 8, padding: 10, background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)' }}>
                         <div className="card-subtitle" style={{ marginBottom: 6 }}>Issues</div>
-                        <div className="scroll" style={{ maxHeight: 160 }}>
-                          <ul style={{ margin: 0, paddingLeft: 18 }}>
-                            {issues.map((iss, idx) => (
-                              <li key={idx} style={{ color: iss.type === 'sql' ? 'crimson' : undefined }}>{iss.type}: {iss.message}</li>
-                            ))}
-                          </ul>
-                        </div>
+                        <ul style={{ margin: 0, paddingLeft: 18 }}>
+                          {issues.map((iss, idx) => (
+                            <li key={idx} style={{ color: iss.type === 'sql' ? 'crimson' : undefined }}>{iss.type}: {iss.message}</li>
+                          ))}
+                        </ul>
                       </div>
                     )}
                   </div>
                   <div>
-                    {aiOpenById[it.id] && (
-                      <>
-                        <div className="card-subtitle" style={{ marginBottom: 6 }}>AI Assist</div>
-                        <div style={{ display: 'grid', gap: 6 }}>
-                          <textarea className="input" placeholder="Ask AI to revise SQL/chart/filters..." value={aiInputById[it.id] || ''} onChange={e => setAiInputById(prev => ({ ...prev, [it.id]: e.target.value }))} style={{ width: '100%', minHeight: 72, resize: 'vertical' }} />
-                          <button className="btn btn-sm" onClick={() => sendAi(it)} disabled={!!aiTypingById[it.id]}>{aiTypingById[it.id] ? 'Asking…' : 'Ask AI'}</button>
-                          <div className="scroll" style={{ maxHeight: 220 }}>
-                            {(aiChatById[it.id] || []).map((m, i) => (
-                              <div key={i} style={{ marginBottom: 8 }}>
-                                <div className="card-subtitle" style={{ marginBottom: 2 }}>{m.role === 'user' ? 'You' : 'Assistant'}</div>
-                                {m.role === 'assistant' ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown> : <div>{m.text}</div>}
-                              </div>
-                            ))}
+                    <div className="card-subtitle" style={{ marginBottom: 6 }}>AI Assist</div>
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <textarea className="input" placeholder="Ask AI to revise SQL/chart/filters..." value={aiInputById[it.id] || ''} onChange={e => setAiInputById(prev => ({ ...prev, [it.id]: e.target.value }))} style={{ width: '100%', minHeight: 72, resize: 'vertical' }} />
+                      <button className="btn btn-sm" onClick={() => sendAi(it)}>Ask AI</button>
+                      <div style={{ maxHeight: 140, overflow: 'auto', padding: 8, border: '1px solid var(--border)', borderRadius: 8 }}>
+                        {(aiChatById[it.id] || []).map((m, i) => (
+                          <div key={i} style={{ marginBottom: 8 }}>
+                            <div className="card-subtitle" style={{ marginBottom: 2 }}>{m.role === 'user' ? 'You' : 'Assistant'}</div>
+                            {m.role === 'assistant' ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown> : <div>{m.text}</div>}
                           </div>
-                        </div>
-                      </>
-                    )}
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
