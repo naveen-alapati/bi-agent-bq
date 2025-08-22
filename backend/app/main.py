@@ -124,30 +124,35 @@ def generate_custom_kpi(payload: Dict[str, Any]):
 	"""
 	Generate a custom KPI based on user description and selected tables.
 	Body: { tables: List[TableRef], description: str, clarifying_questions?: List[str], answers?: List[str] }
-	Returns: { kpi: KPIItem, sql: str, chart_type: str, vega_lite_spec: dict }
+	Returns either:
+	  - { clarifying_questions: string[] } when more info is required
+	  - { kpi: KPIItem } when KPI is ready
 	"""
 	try:
 		tables = payload.get('tables', [])
 		description = payload.get('description', '')
-		clarifying_questions = payload.get('clarifying_questions', [])
-		answers = payload.get('answers', [])
+		clarifying_questions = payload.get('clarifying_questions')
+		answers = payload.get('answers')
 		
 		if not tables or not description:
 			raise HTTPException(status_code=400, detail="Tables and description are required")
 		
-		# If we have clarifying questions but no answers, return the questions
-		if clarifying_questions and not answers:
-			return {"clarifying_questions": clarifying_questions}
+		# Ask service to generate or request clarifications
+		result = kpi_service.generate_custom_kpi(tables, description, answers)
 		
-		# Generate the custom KPI
-		kpi_result = kpi_service.generate_custom_kpi(tables, description, answers)
+		# If the service returned clarifying questions
+		if isinstance(result, dict) and 'clarifying_questions' in result:
+			return {"clarifying_questions": result['clarifying_questions']}
 		
-		return {
-			"kpi": kpi_result,
-			"sql": kpi_result.sql,
-			"chart_type": kpi_result.chart_type,
-			"vega_lite_spec": kpi_result.vega_lite_spec
-		}
+		# Otherwise assume KPIItem and return in a consistent envelope
+		try:
+			# pydantic BaseModel (KPIItem) supports model_dump
+			kpi_obj = result.model_dump() if hasattr(result, 'model_dump') else dict(result)
+		except Exception:
+			kpi_obj = dict(result)
+		return {"kpi": kpi_obj}
+	except HTTPException:
+		raise
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 

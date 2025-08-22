@@ -200,20 +200,30 @@ export default function App() {
     setLoading(true)
     try {
       await api.prepare(selected, 5)
-      const kpisResp = await api.generateKpis(selected, 5)
-      
-      // Add KPIs to catalog only - don't add to dashboard automatically
-      for (const sel of selected) {
-        const perTable = kpisResp.filter(k => (k.id || '').startsWith(`${sel.datasetId}.${sel.tableId}:`))
-        if (perTable.length) {
-          await api.addToKpiCatalog(sel.datasetId, sel.tableId, perTable)
-        }
+      // Generate drafts
+      const drafts = await api.kpiDraftsGenerate(selected, 5)
+      if (!Array.isArray(drafts) || drafts.length === 0) {
+        toast('error', 'No KPIs generated. Try different tables or settings.')
+        return
       }
-      
-      // Show success message and inform user to add KPIs from catalog
-      toast('success', `Generated ${kpisResp.length} KPIs and added to catalog. Use the KPI Catalog to add them to your dashboard.`)
-      
-      // Trigger a refresh of the KPI Catalog to show newly added KPIs
+      // Validate drafts
+      const validation = await api.kpiDraftsValidate(selected, drafts)
+      const validIds = new Set((validation || []).filter(v => v.valid).map(v => v.id))
+      const validDrafts = drafts.filter(d => validIds.has(d.id))
+      const invalidCount = drafts.length - validDrafts.length
+      // Finalize only valid drafts
+      let inserted = 0
+      if (validDrafts.length) {
+        const res = await api.kpiDraftsFinalize(validDrafts)
+        inserted = res.inserted || 0
+      }
+      // UX feedback
+      if (inserted > 0) {
+        toast('success', `Generated ${drafts.length} KPIs (${validDrafts.length} valid). Added ${inserted} to catalog.`)
+      } else {
+        toast('error', `Generated ${drafts.length} KPIs but none were finalized${invalidCount ? ` (${invalidCount} invalid)` : ''}.`)
+      }
+      // Refresh KPI Catalog panel
       setCatalogRefreshKey(prev => prev + 1)
     } catch (error) {
       console.error('Failed to analyze tables:', error)

@@ -70,5 +70,19 @@ export const api = {
   async cxoSend(conversation_id: string, message: string, context: any) {
     const r = await axios.post('/api/cxo/send', { conversation_id, message, context })
     return r.data.reply as string
+  },
+
+  // KPI Draft flow
+  async kpiDraftsGenerate(tables: {datasetId: string, tableId: string}[], k = 5) {
+    const r = await axios.post('/api/kpi_drafts/generate', { tables, k })
+    return r.data.kpis as any[]
+  },
+  async kpiDraftsValidate(tables: {datasetId: string, tableId: string}[], kpis: any[]) {
+    const r = await axios.post('/api/kpi_drafts/validate', { tables, kpis })
+    return r.data.results as { id: string; valid: boolean; issues: { type: string; message: string }[] }[]
+  },
+  async kpiDraftsFinalize(kpis: any[]) {
+    const r = await axios.post('/api/kpi_drafts/finalize', { kpis })
+    return r.data as { inserted: number }
   }
 }
