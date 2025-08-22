@@ -62,6 +62,7 @@ class KPIItem(BaseModel):
 	vega_lite_spec: Optional[Dict[str, Any]] = None
 	filter_date_column: Optional[str] = None
 	tabs: Optional[List[str]] = None
+	confidence_score: Optional[float] = None
 
 
 class GenerateKpisResponse(BaseModel):
@@ -97,6 +98,7 @@ class KPICatalogItem(BaseModel):
 	tags: Optional[Dict[str, Any]] = None
 	engine: Optional[str] = None
 	vega_lite_spec: Optional[Dict[str, Any]] = None
+	confidence_score: Optional[float] = None
 
 
 class KPICatalogListResponse(BaseModel):

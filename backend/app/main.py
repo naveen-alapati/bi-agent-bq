@@ -298,20 +298,41 @@ def kpi_drafts_generate(req: KPIDraftGenerateRequest):
 def kpi_drafts_validate(req: KPIDraftValidateRequest):
 	"""Validate draft KPIs by running lightweight checks and dry-run explain to BigQuery."""
 	results = []
+	# Build set of selected tables for quick membership checks
+	selected_tables = { f"{t.datasetId}.{t.tableId}" for t in (req.tables or []) }
 	for k in req.kpis:
 		issues = []
 		valid = True
 		# basic schema check: expected aliases present in SQL
 		try:
 			expected = (k.expected_schema or '').lower()
+			low_sql = f" {k.sql} ".lower()
 			if expected.startswith('timeseries'):
-				if ' x ' not in f" {k.sql} ".lower() or ' y ' not in f" {k.sql} ".lower():
+				if ' x ' not in low_sql or ' y ' not in low_sql:
 					issues.append({"type": "schema", "message": "Timeseries requires aliases x and y."})
 					valid = False
 			elif expected.startswith('categorical') or expected.startswith('distribution'):
-				if ' label ' not in f" {k.sql} ".lower() or ' value ' not in f" {k.sql} ".lower():
+				if ' label ' not in low_sql or ' value ' not in low_sql:
 					issues.append({"type": "schema", "message": "Categorical/distribution requires aliases label and value."})
 					valid = False
+		except Exception:
+			pass
+		# table reference check: warn when referencing tables outside selected set
+		try:
+			# naive regex for fully-qualified refs project.dataset.table or dataset.table
+			import re
+			refs = set(re.findall(r"`?([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+)`?", k.sql))
+			# also capture dataset.table without project (assume current project)
+			refs |= set(re.findall(r"\b([a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+)\b", k.sql))
+			missing = []
+			for r in refs:
+				parts = r.split('.')
+				key = '.'.join(parts[-2:]) if len(parts) >= 2 else r
+				if key and selected_tables and key not in selected_tables:
+					missing.append(key)
+			if missing:
+				issues.append({"type": "table", "message": f"References tables not in selection: {', '.join(sorted(set(missing)))}"})
+				valid = False
 		except Exception:
 			pass
 		# dry run by limiting to 1 row
@@ -322,6 +343,18 @@ def kpi_drafts_validate(req: KPIDraftValidateRequest):
 		except Exception as e:
 			issues.append({"type": "sql", "message": str(e)})
 			valid = False
+		# optional live probe to detect insufficient data
+		try:
+			probe_sql = f"SELECT COUNT(1) AS c FROM ( {k.sql} )"
+			loc = bq_service._infer_location_from_sql(probe_sql) or bq_service.location
+			rows = list(bq_service.client.query(probe_sql, job_config=bigquery.QueryJobConfig(use_query_cache=False), location=loc))
+			cnt = int(dict(rows[0]).get('c', 0)) if rows else 0
+			if cnt == 0:
+				issues.append({"type": "data", "message": "Query returns no rows (insufficient data)."})
+				valid = False
+		except Exception:
+			# ignore live probe errors (handled above by dry run)
+			pass
 		results.append({"id": k.id, "valid": valid, "issues": issues, "columns": None})
 	return {"results": results}
 
@@ -347,6 +380,7 @@ def kpi_drafts_finalize(req: KPIDraftFinalizeRequest):
 				"vega_lite_spec": k.vega_lite_spec,
 				"dataset_id": dataset_id,
 				"table_id": table_id,
+				"confidence_score": getattr(k, 'confidence_score', None),
 			}
 			by_table.setdefault(f"{dataset_id}.{table_id}", []).append(item)
 		inserted = 0

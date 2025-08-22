@@ -12,6 +12,7 @@ import { TopBar } from '../ui/TopBar'
 import { KPICatalog } from '../ui/KPICatalog'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { KPIDraftsModal } from '../ui/KPIDraftsModal'
 
 export default function App() {
   const params = useParams()
@@ -69,6 +70,10 @@ export default function App() {
   const [addKpiGeneratedKpi, setAddKpiGeneratedKpi] = useState<any>(null)
   const [addKpiStep, setAddKpiStep] = useState<'description' | 'clarifying' | 'generated'>('description')
   const [addKpiEditedSql, setAddKpiEditedSql] = useState('')
+  
+  // Drafts Modal state
+  const [draftsModalOpen, setDraftsModalOpen] = useState(false)
+  const [draftsInitial, setDraftsInitial] = useState<any[]>([])
 
   function applyPalette(p: { primary: string; accent: string; surface: string; warn: string }) {
     const r = document.documentElement
@@ -200,21 +205,11 @@ export default function App() {
     setLoading(true)
     try {
       await api.prepare(selected, 5)
-      const kpisResp = await api.generateKpis(selected, 5)
-      
-      // Add KPIs to catalog only - don't add to dashboard automatically
-      for (const sel of selected) {
-        const perTable = kpisResp.filter(k => (k.id || '').startsWith(`${sel.datasetId}.${sel.tableId}:`))
-        if (perTable.length) {
-          await api.addToKpiCatalog(sel.datasetId, sel.tableId, perTable)
-        }
-      }
-      
-      // Show success message and inform user to add KPIs from catalog
-      toast('success', `Generated ${kpisResp.length} KPIs and added to catalog. Use the KPI Catalog to add them to your dashboard.`)
-      
-      // Trigger a refresh of the KPI Catalog to show newly added KPIs
-      setCatalogRefreshKey(prev => prev + 1)
+      const drafts = await api.kpiDraftsGenerate(selected, 5)
+      // Open drafts modal for interactive review before cataloging
+      setDraftsInitial(drafts)
+      setDraftsModalOpen(true)
+      toast('success', `Generated ${drafts.length} KPI drafts. Review and finalize to add to catalog.`)
     } catch (error) {
       console.error('Failed to analyze tables:', error)
       toast('error', 'Failed to analyze tables. Please try again.')
@@ -1047,6 +1042,21 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+      {/* KPI Drafts Modal */}
+      {draftsModalOpen && (
+        <KPIDraftsModal
+          open={draftsModalOpen}
+          tables={selected}
+          drafts={draftsInitial}
+          globalDate={globalDate}
+          onClose={() => setDraftsModalOpen(false)}
+          onFinalized={(inserted) => {
+            toast('success', `Added ${inserted} KPIs to catalog`)
+            setCatalogRefreshKey(prev => prev + 1)
+            setDraftsModalOpen(false)
+          }}
+        />
       )}
     </div>
   )

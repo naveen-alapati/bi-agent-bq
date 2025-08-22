@@ -610,6 +610,7 @@ class BigQueryService:
                 bigquery.SchemaField("tags", "STRING"),
                 bigquery.SchemaField("engine", "STRING"),
                 bigquery.SchemaField("vega_lite_spec", "STRING"),
+                bigquery.SchemaField("confidence_score", "FLOAT64"),
                 bigquery.SchemaField("created_at", "TIMESTAMP"),
                 bigquery.SchemaField("usage_count", "INT64"),
             ]
@@ -633,6 +634,7 @@ class BigQueryService:
                 "tags": json.dumps(item.get('tags') or {}),
                 "engine": item.get('engine'),
                 "vega_lite_spec": json.dumps(item.get('vega_lite_spec') or {}),
+                "confidence_score": item.get('confidence_score'),
                 "created_at": now,
                 "usage_count": 0,
             })
@@ -644,7 +646,7 @@ class BigQueryService:
 
     def list_kpi_catalog(self, dataset_id: str = "analytics_dash", dataset_filter: Optional[str] = None, table_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         table = self.ensure_kpi_catalog(dataset_id)
-        sql = f"SELECT id, name, sql, chart_type, expected_schema, dataset_id, table_id, tags, engine, vega_lite_spec, CAST(created_at AS STRING) AS created_at, usage_count FROM `{table}`"
+        sql = f"SELECT id, name, sql, chart_type, expected_schema, dataset_id, table_id, tags, engine, vega_lite_spec, confidence_score, CAST(created_at AS STRING) AS created_at, usage_count FROM `{table}`"
         conds = []
         params = []
         if dataset_filter:

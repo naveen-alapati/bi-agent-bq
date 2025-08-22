@@ -7,4 +7,5 @@ export type KPI = {
   d3_chart: string
   expected_schema: string
   sql: string
+  confidence_score?: number
 }

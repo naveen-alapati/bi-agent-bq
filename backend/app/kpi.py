@@ -16,7 +16,7 @@ SYSTEM_PROMPT_TEMPLATE = (
     "Use BigQuery SQL (Standard SQL). The user wants the Top {k} high-impact KPIs for the dataset/table(s) described below. "
     "Your KPIs should be decision-grade (not vanity metrics) and help executives understand performance, growth, efficiency, and risk.\n\n"
     "Rules for each KPI you produce:\n"
-    "- Provide fields: id (short slug), name, short_description (1 sentence), chart_type (line|bar|pie|area|scatter), d3_chart (short hint),\n"
+    "- Provide fields: id (short slug), name, short_description (1 sentence), chart_type (line|bar|pie|area|scatter),\n"
     "  expected_schema (one of: timeseries {{x:DATE|TIMESTAMP or STRING, y:NUMBER}}, categorical {{label:STRING, value:NUMBER}}, distribution {{label, value}}),\n"
     "  sql (ready-to-run BigQuery SQL), engine ('vega-lite'), vega_lite_spec (valid spec with data:{{values: []}}), and filter_date_column when applicable.\n"
     "- The SQL MUST return columns aliased exactly as required by expected_schema: for timeseries use x,y; for categorical use label,value; for distribution use label,value.\n"
@@ -336,6 +336,20 @@ class KPIService:
                     slug = raw.get("id", f"kpi_{count+1}")
                     # Ensure timeseries can be filtered by date: default to 'x' which is the date alias
                     filter_col = raw.get("filter_date_column") or ("x" if isinstance(expected_schema, str) and expected_schema.startswith("timeseries") else date_col)
+                    # Heuristic confidence score (0.0 - 1.0)
+                    conf = 0.5
+                    try:
+                        conf += 0.15 if expected_schema in ("timeseries","categorical","distribution","scatter") else 0
+                        low_sql = f" {sql} ".lower()
+                        if expected_schema.startswith("timeseries") and (' x ' in low_sql and ' y ' in low_sql):
+                            conf += 0.2
+                        if (expected_schema.startswith("categorical") or expected_schema.startswith("distribution")) and (' label ' in low_sql and ' value ' in low_sql):
+                            conf += 0.2
+                        if filter_col:
+                            conf += 0.1
+                        conf = max(0.0, min(1.0, conf))
+                    except Exception:
+                        conf = 0.5
                     item = KPIItem(
                         id=f"{table_slug}:{slug}",
                         name=(raw.get("name") or "KPI"),
@@ -347,6 +361,7 @@ class KPIService:
                         engine="vega-lite",
                         vega_lite_spec=self._normalize_vega_lite_spec(raw.get("vega_lite_spec")),
                         filter_date_column=filter_col,
+                        confidence_score=conf,
                     )
                     all_items.append(item)
                     count += 1
@@ -374,6 +389,19 @@ class KPIService:
                         base_slug = raw.get("id", f"cross_{count+1}")
                         slug = f"cross_{base_slug}"
                         filter_col = raw.get("filter_date_column") or ("x" if isinstance(expected_schema, str) and expected_schema.startswith("timeseries") else primary_date_col)
+                        conf = 0.5
+                        try:
+                            conf += 0.15 if expected_schema in ("timeseries","categorical","distribution","scatter") else 0
+                            low_sql = f" {sql} ".lower()
+                            if expected_schema.startswith("timeseries") and (' x ' in low_sql and ' y ' in low_sql):
+                                conf += 0.2
+                            if (expected_schema.startswith("categorical") or expected_schema.startswith("distribution")) and (' label ' in low_sql and ' value ' in low_sql):
+                                conf += 0.2
+                            if filter_col:
+                                conf += 0.1
+                            conf = max(0.0, min(1.0, conf))
+                        except Exception:
+                            conf = 0.5
                         item = KPIItem(
                             id=f"{primary_slug}:{slug}",
                             name=(raw.get("name") or "KPI"),
@@ -385,6 +413,7 @@ class KPIService:
                             engine="vega-lite",
                             vega_lite_spec=self._normalize_vega_lite_spec(raw.get("vega_lite_spec")),
                             filter_date_column=filter_col,
+                            confidence_score=conf,
                         )
                         all_items.append(item)
                         count += 1
