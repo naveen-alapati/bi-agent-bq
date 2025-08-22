@@ -1,0 +1,76 @@
+Implementation plan
+
+- Backend: data model
+  - Add confidence_score?: number to KPIItem and KPICatalogItem.
+  - Persist confidence_score in the KPI catalog table (add nullable FLOAT column).
+  - Populate confidence_score in generation (from LLM output if present; else heuristic fallback).
+
+- Backend: endpoints/logic
+  - Keep existing draft endpoints:
+    - /api/kpi_drafts/generate: include confidence_score in each KPI.
+    - /api/kpi_drafts/validate: extend checks to return user-friendly issues:
+      - Not enough data: run SELECT * FROM ( <sql> ) LIMIT 1 (non-dry-run) and flag zero-row/error as “insufficient data.”
+      - Missing tables: detect referenced dataset.table not in selected tables; flag “missing table.”
+      - Chart compatibility: verify expected aliases by chart type (timeseries: x,y; categorical/distribution: label,value; scatter: x,y,(label)).
+    - /api/kpi_drafts/finalize: unchanged behavior; pass through confidence_score to catalog.
+
+- Frontend: API layer (frontend/src/services/api.ts)
+  - Add:
+    - kpiDraftsGenerate(tables, k)
+    - kpiDraftsValidate(tables, kpis)
+    - kpiDraftsFinalize(kpis)
+  - Extend types to include confidence_score?: number.
+
+- Frontend: integrate Analyze flow (frontend/src/pages/App.tsx)
+  - Replace generateKpis + addToKpiCatalog with draft flow:
+    - prepare(tables) → kpiDraftsGenerate(tables) → open KPIDraftsModal.
+  - After successful finalize, refresh KPICatalog and toast success.
+
+- Frontend: KPIDraftsModal (new component frontend/src/ui/KPIDraftsModal.tsx)
+  - Open on Analyze; also provide a “Review Drafts” entry point.
+  - Draft list
+    - Group by dataset.table, search/filter, select all/none.
+    - Per-draft card: name, chart type, expected schema, engine, SQL preview, confidence_score badge.
+    - Actions: Edit (inline), Remove from list, Restore original.
+  - AI interactive review
+    - Prompt box “Ask AI to revise” using existing /api/kpi/edit_chat (send current draft and history).
+    - Apply suggestions to SQL/chart/name; mark as modified; allow undo; re-validate.
+  - Validation and testing
+    - Validate selected/all via /api/kpi_drafts/validate.
+    - Show pass/fail; issues categorized: Insufficient data, Missing table, Chart/schema mismatch, SQL error.
+    - “Test SQL” button: run /api/run_kpi with current filters; show row count and small sample; mini chart preview to confirm compatibility.
+  - Metadata tweaks
+    - Edit display name, chart type, expected schema, filter date column; diff hint vs original.
+  - Finalize
+    - Enable “Finalize to Catalog” for valid, selected drafts. On success, close modal, refresh KPICatalog, optional “Add to Canvas now” checkbox.
+
+- UX details
+  - Confidence score
+    - Badge with color thresholds (e.g., ≥0.8 green, 0.6–0.79 amber, <0.6 red).
+    - Tooltip explaining score factors.
+  - Status and errors
+    - Spinners for generate/validate/test/finalize; per-row and global error toasts.
+  - Keyboard/behavior
+    - ESC to close; draggable header; responsive layout.
+
+- Validation rules (concise)
+  - Data sufficiency: non-dry-run LIMIT 1 (or COUNT(*)) check → issue when zero.
+  - Missing tables: SQL references not in selected set → issue.
+  - Chart/schema: alias checks per chart; also sample rows shape check after “Test SQL.”
+  - Prevent finalize if issues unresolved or not acknowledged.
+
+- Telemetry/observability
+  - Log validate/test/finalize actions with counts and timings (console + optional backend logs).
+
+- Backward compatibility
+  - Keep the existing “Add KPI” custom modal intact; may later unify with drafts.
+
+- Files to change/add
+  - Backend: backend/app/models.py, backend/app/kpi.py, backend/app/main.py, KPI catalog table schema (migration/update).
+  - Frontend: frontend/src/services/api.ts, frontend/src/pages/App.tsx (Analyze flow), new frontend/src/ui/KPIDraftsModal.tsx, minor CSS in frontend/src/styles.css.
+
+- Acceptance criteria
+  - Analyze opens modal with generated drafts containing chart type, SQL, and confidence score.
+  - User can AI-edit, manually edit, test, validate, add/update/remove drafts.
+  - Clear issues shown for insufficient data/missing tables/incompatible chart.
+  - Finalizing adds selected drafts to KPI catalog; catalog refreshes; optional add-to-canvas works.
