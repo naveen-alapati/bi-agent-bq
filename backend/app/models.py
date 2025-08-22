@@ -161,3 +161,42 @@ class DashboardGetResponse(BaseModel):
 	tabs: Optional[List[DashboardTab]] = None
 	tab_layouts: Optional[Dict[str, List[Dict[str, Any]]]] = None
 	last_active_tab: Optional[str] = None
+
+
+# KPI Draft Session APIs
+class KPIDraftGenerateRequest(BaseModel):
+	tables: List[TableRef]
+	k: Optional[int] = 5
+
+
+class KPIDraftGenerateResponse(BaseModel):
+	kpis: List[KPIItem]
+
+
+class KPIValidationIssue(BaseModel):
+	type: str
+	message: str
+
+
+class KPIDraftValidationResult(BaseModel):
+	id: str
+	valid: bool
+	issues: List[KPIValidationIssue] = []
+	columns: Optional[List[Dict[str, Any]]] = None
+
+
+class KPIDraftValidateRequest(BaseModel):
+	tables: List[TableRef]
+	kpis: List[KPIItem]
+
+
+class KPIDraftValidateResponse(BaseModel):
+	results: List[KPIDraftValidationResult]
+
+
+class KPIDraftFinalizeRequest(BaseModel):
+	kpis: List[KPIItem]
+
+
+class KPIDraftFinalizeResponse(BaseModel):
+	inserted: int
