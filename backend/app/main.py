@@ -31,6 +31,12 @@ from .models import (
 	DashboardGetResponse,
 	KPICatalogAddRequest,
 	KPICatalogListResponse,
+	KPIDraftGenerateRequest,
+	KPIDraftGenerateResponse,
+	KPIDraftValidateRequest,
+	KPIDraftValidateResponse,
+	KPIDraftFinalizeRequest,
+	KPIDraftFinalizeResponse,
 )
 from .diagnostics import run_self_test
 from .llm import LLMClient
@@ -276,6 +282,80 @@ def edit_kpi_chat(payload: Dict[str, Any]):
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
+
+# KPI Draft Session Endpoints
+@app.post("/api/kpi_drafts/generate", response_model=KPIDraftGenerateResponse)
+def kpi_drafts_generate(req: KPIDraftGenerateRequest):
+	try:
+		k = req.k or 5
+		kpis = kpi_service.generate_kpis(req.tables, k=k)
+		return {"kpis": kpis}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/kpi_drafts/validate", response_model=KPIDraftValidateResponse)
+def kpi_drafts_validate(req: KPIDraftValidateRequest):
+	"""Validate draft KPIs by running lightweight checks and dry-run explain to BigQuery."""
+	results = []
+	for k in req.kpis:
+		issues = []
+		valid = True
+		# basic schema check: expected aliases present in SQL
+		try:
+			expected = (k.expected_schema or '').lower()
+			if expected.startswith('timeseries'):
+				if ' x ' not in f" {k.sql} ".lower() or ' y ' not in f" {k.sql} ".lower():
+					issues.append({"type": "schema", "message": "Timeseries requires aliases x and y."})
+					valid = False
+			elif expected.startswith('categorical') or expected.startswith('distribution'):
+				if ' label ' not in f" {k.sql} ".lower() or ' value ' not in f" {k.sql} ".lower():
+					issues.append({"type": "schema", "message": "Categorical/distribution requires aliases label and value."})
+					valid = False
+		except Exception:
+			pass
+		# dry run by limiting to 1 row
+		try:
+			probe_sql = f"SELECT * FROM ( {k.sql} ) LIMIT 1"
+			loc = bq_service._infer_location_from_sql(probe_sql) or bq_service.location
+			job = bq_service.client.query(probe_sql, job_config=bigquery.QueryJobConfig(dry_run=True, use_query_cache=False), location=loc)
+		except Exception as e:
+			issues.append({"type": "sql", "message": str(e)})
+			valid = False
+		results.append({"id": k.id, "valid": valid, "issues": issues, "columns": None})
+	return {"results": results}
+
+
+@app.post("/api/kpi_drafts/finalize", response_model=KPIDraftFinalizeResponse)
+def kpi_drafts_finalize(req: KPIDraftFinalizeRequest):
+	try:
+		# Group by dataset.table using id prefix convention "dataset.table:slug"
+		by_table: Dict[str, List[Dict[str, Any]]] = {}
+		for k in req.kpis:
+			try:
+				prefix, _ = (k.id or '').split(':', 1)
+				dataset_id, table_id = prefix.split('.', 1)
+			except Exception:
+				continue
+			item = {
+				"id": k.id,
+				"name": k.name,
+				"sql": k.sql,
+				"chart_type": k.chart_type,
+				"expected_schema": k.expected_schema,
+				"engine": k.engine,
+				"vega_lite_spec": k.vega_lite_spec,
+				"dataset_id": dataset_id,
+				"table_id": table_id,
+			}
+			by_table.setdefault(f"{dataset_id}.{table_id}", []).append(item)
+		inserted = 0
+		for key, items in by_table.items():
+			ds, tb = key.split('.', 1)
+			inserted += bq_service.add_to_kpi_catalog(items, dataset_id=DASH_DATASET)
+		return {"inserted": inserted}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.delete("/api/dashboards/{dashboard_id}")
