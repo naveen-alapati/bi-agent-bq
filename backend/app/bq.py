@@ -93,12 +93,15 @@ class BigQueryService:
                     ds.dataset_id.startswith('test_')
                 )
             
+            # Skip backend-created datasets entirely
+            if is_backend_created:
+                continue
+            
             datasets.append(
                 {
                     "datasetId": ds.dataset_id,
                     "friendlyName": None,
                     "description": None,
-                    "isBackendCreated": is_backend_created,
                 }
             )
         return datasets
