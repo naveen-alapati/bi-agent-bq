@@ -597,7 +597,13 @@ class BigQueryService:
         self.ensure_dataset(dataset_id)
         table_fqn = f"{self.project_id}.{dataset_id}.{table}"
         try:
-            self.client.get_table(table_fqn)
+            table_obj = self.client.get_table(table_fqn)
+            # Ensure confidence_score column exists; add if missing
+            names = {f.name for f in (table_obj.schema or [])}
+            if "confidence_score" not in names:
+                new_schema = list(table_obj.schema) + [bigquery.SchemaField("confidence_score", "FLOAT64")]
+                table_obj.schema = new_schema
+                self.client.update_table(table_obj, ["schema"])
         except NotFound:
             schema = [
                 bigquery.SchemaField("id", "STRING"),
