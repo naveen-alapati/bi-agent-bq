@@ -201,20 +201,9 @@ export default function App() {
     try {
       await api.prepare(selected, 5)
       const kpisResp = await api.generateKpis(selected, 5)
-      
-      // Add KPIs to catalog only - don't add to dashboard automatically
-      for (const sel of selected) {
-        const perTable = kpisResp.filter(k => (k.id || '').startsWith(`${sel.datasetId}.${sel.tableId}:`))
-        if (perTable.length) {
-          await api.addToKpiCatalog(sel.datasetId, sel.tableId, perTable)
-        }
-      }
-      
-      // Show success message and inform user to add KPIs from catalog
-      toast('success', `Generated ${kpisResp.length} KPIs and added to catalog. Use the KPI Catalog to add them to your dashboard.`)
-      
-      // Trigger a refresh of the KPI Catalog to show newly added KPIs
-      setCatalogRefreshKey(prev => prev + 1)
+      try { sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts: kpisResp, selectedTables: selected })) } catch {}
+      toast('success', `Generated ${kpisResp.length} KPIs. Review and publish from KPI Draft.`)
+      navigate('/kpi-draft', { state: { drafts: kpisResp, selectedTables: selected } })
     } catch (error) {
       console.error('Failed to analyze tables:', error)
       toast('error', 'Failed to analyze tables. Please try again.')
