@@ -162,3 +162,21 @@ class DashboardGetResponse(BaseModel):
 	tabs: Optional[List[DashboardTab]] = None
 	tab_layouts: Optional[Dict[str, List[Dict[str, Any]]]] = None
 	last_active_tab: Optional[str] = None
+
+
+class AnalystChatMessage(BaseModel):
+	role: str
+	content: str
+
+
+class AnalystChatRequest(BaseModel):
+	message: str
+	kpis: List[KPIItem]
+	tables: List[TableRef]
+	prefer_cross: Optional[bool] = False
+	history: Optional[List[AnalystChatMessage]] = None
+
+
+class AnalystChatResponse(BaseModel):
+	reply: str
+	kpis: Optional[List[KPIItem]] = None

@@ -70,5 +70,10 @@ export const api = {
   async cxoSend(conversation_id: string, message: string, context: any) {
     const r = await axios.post('/api/cxo/send', { conversation_id, message, context })
     return r.data.reply as string
+  },
+
+  async analystChat(message: string, kpis: any[], tables: {datasetId: string, tableId: string}[], history?: {role: string; content: string}[], prefer_cross: boolean = true) {
+    const r = await axios.post('/api/analyst/chat', { message, kpis, tables, history, prefer_cross })
+    return r.data as { reply: string; kpis?: any[] }
   }
 }

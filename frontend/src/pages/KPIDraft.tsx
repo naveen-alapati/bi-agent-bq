@@ -31,12 +31,28 @@ export default function KPIDraft() {
 	const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({})
 	const [testing, setTesting] = useState<Record<string, { status: 'idle'|'loading'|'success'|'error'; rows?: number; error?: string }>>({})
 	const [publishing, setPublishing] = useState(false)
+	// Analyst chat state
+	const [chatOpen, setChatOpen] = useState(true)
+	const [chatHistory, setChatHistory] = useState<{ role: 'user'|'assistant'; content: string }[]>([])
+	const [chatInput, setChatInput] = useState('')
+	const [chatLoading, setChatLoading] = useState(false)
+	const [chatProposals, setChatProposals] = useState<any[] | null>(null)
 
 	useEffect(() => {
 		try {
 			sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts, selectedTables }))
 		} catch {}
 	}, [drafts, selectedTables])
+
+	useEffect(() => {
+		// Send initial message to Analyst with current drafts
+		if (chatHistory.length === 0 && drafts.length > 0) {
+			setTimeout(() => {
+				void sendChat("We have generated the following KPIs. Please propose high-value cross-table KPIs and tell us what additional data or keys are required if joins are insufficient.")
+			}, 0)
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [])
 
 	function parseSources(k: any): { cross: boolean; sources: string[] } {
 		try {
@@ -112,6 +128,38 @@ export default function KPIDraft() {
 		}
 	}
 
+	async function sendChat(message?: string) {
+		const msg = (message ?? chatInput).trim()
+		if (!msg) return
+		setChatInput('')
+		setChatLoading(true)
+		setChatHistory(prev => [...prev, { role: 'user', content: msg }])
+		try {
+			const res = await api.analystChat(msg, drafts, selectedTables, chatHistory, true)
+			setChatHistory(prev => [...prev, { role: 'assistant', content: res.reply }])
+			if (Array.isArray(res.kpis) && res.kpis.length) {
+				setChatProposals(res.kpis)
+			}
+		} catch (e: any) {
+			setChatHistory(prev => [...prev, { role: 'assistant', content: `Sorry, I hit an error: ${String(e?.response?.data?.detail || e?.message || e)}` }])
+		} finally {
+			setChatLoading(false)
+		}
+	}
+
+	function addProposalToDrafts(k: any) {
+		setDrafts(prev => [...prev, k])
+		setChatProposals(ps => (Array.isArray(ps) ? ps.filter(x => x.id !== k.id) : null))
+	}
+
+	async function analyzeSimilar() {
+		try {
+			await api.prepare(selectedTables, 5)
+			const more = await api.generateKpis(selectedTables, 5, true)
+			setDrafts(prev => [...prev, ...more])
+		} catch (e) {}
+	}
+
 	return (
 		<div className="app-grid">
 			<div className="panel" style={{ gridColumn: '1 / -1' }}>
@@ -169,6 +217,54 @@ export default function KPIDraft() {
 						</div>
 					))}
 				</div>
+			</div>
+
+			{/* AI Analyst Chat */}
+			<div className="panel" style={{ gridColumn: '1 / -1' }}>
+				<div className="section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+					<span>AI Analyst</span>
+					<button className="btn btn-sm" onClick={() => setChatOpen(o => !o)}>{chatOpen ? 'Hide' : 'Show'}</button>
+				</div>
+				{chatOpen && (
+					<div style={{ display: 'grid', gap: 8 }}>
+						<div className="card-subtitle">Ask for cross-table KPIs or guidance. The analyst sees your generated KPIs and tables.</div>
+						<div style={{ maxHeight: 240, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
+							{chatHistory.map((m, i) => (
+								<div key={i} style={{ marginBottom: 8 }}>
+									<div className="card-subtitle" style={{ marginBottom: 4 }}>{m.role === 'user' ? 'You' : 'Analyst'}</div>
+									<div>{m.content}</div>
+								</div>
+							))}
+							{chatLoading && <div className="typing"><span className="dot"></span><span className="dot"></span><span className="dot"></span></div>}
+						</div>
+						<div className="toolbar">
+							<input className="input" placeholder="Ask the analyst..." value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key==='Enter') sendChat() }} style={{ flex: 1 }} />
+							<button className="btn btn-primary" onClick={() => sendChat()} disabled={chatLoading}>Send</button>
+						</div>
+						{Array.isArray(chatProposals) && chatProposals.length > 0 && (
+							<div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+								<div className="card-subtitle" style={{ marginBottom: 8 }}>Proposed KPIs</div>
+								<div className="scroll">
+									{chatProposals.map((k: any) => (
+										<div key={k.id} className="list-item">
+											<div style={{ flex: 1 }}>
+												<div className="card-title">{k.name}</div>
+												<div className="card-subtitle">Chart: {k.chart_type}</div>
+											</div>
+											<div className="toolbar">
+												<button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
+												<button className="btn btn-sm" onClick={() => addProposalToDrafts(k)}>Add to Drafts</button>
+											</div>
+										</div>
+									))}
+								</div>
+								<div className="toolbar" style={{ marginTop: 8 }}>
+									<button className="btn" onClick={analyzeSimilar}>Analyze similar</button>
+								</div>
+							</div>
+						)}
+					</div>
+				)}
 			</div>
 		</div>
 	)

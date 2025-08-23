@@ -31,6 +31,8 @@ from .models import (
 	DashboardGetResponse,
 	KPICatalogAddRequest,
 	KPICatalogListResponse,
+	AnalystChatRequest,
+	AnalystChatResponse,
 )
 from .diagnostics import run_self_test
 from .llm import LLMClient
@@ -512,6 +514,65 @@ def cxo_send(payload: Dict[str, Any]):
 		return {"reply": bot_text}
 	except HTTPException:
 		raise
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/analyst/chat", response_model=AnalystChatResponse)
+def analyst_chat(req: AnalystChatRequest):
+	"""
+	Chat with an AI Analyst. Returns reply and optional KPI proposals.
+	"""
+	try:
+		# Build system prompt focusing on cross-table value and guidance when insufficient data
+		sys = (
+			"You are a senior data analyst with 20 years of experience. Be practical and concise. "
+			"Goal: help the user generate high-value KPIs. Prefer cross-table KPIs when multiple tables are available. "
+			"If joins are not possible due to missing keys, explicitly state which keys/dimensions are needed. "
+			"Output JSON with keys: 'reply' (markdown guidance) and optional 'kpis' (array of KPI objects: id slug, name, short_description, chart_type, expected_schema, sql, engine, vega_lite_spec, filter_date_column)."
+		)
+		user = {
+			"message": req.message,
+			"prefer_cross": bool(req.prefer_cross),
+			"tables": [t.model_dump() if hasattr(t, 'model_dump') else dict(t) for t in req.tables],
+			"current_kpis": [k.model_dump() if hasattr(k, 'model_dump') else dict(k) for k in req.kpis],
+			"history": [h.model_dump() if hasattr(h, 'model_dump') else dict(h) for h in (req.history or [])][-10:]
+		}
+		resp = llm_client.generate_json(sys, json.dumps(user))
+		reply = ""
+		kpi_props = None
+		if isinstance(resp, dict):
+			reply = resp.get('reply') or resp.get('markdown') or resp.get('text') or ""
+			kp = resp.get('kpis')
+			if isinstance(kp, list):
+				# Normalize into KPIItem list using existing coercion helpers via KPIService
+				kpi_props = []
+				for raw in kp:
+					try:
+						sql = kpi_service._strip_code_fences(raw.get("sql", ""))
+						expected_schema = kpi_service._normalize_expected_schema(raw.get("expected_schema", ""))
+						if not sql or not expected_schema:
+							continue
+						# Use first table as base for id if not provided
+						base = f"{req.tables[0].datasetId}.{req.tables[0].tableId}" if req.tables else "unknown.unknown"
+						slug = raw.get("id", f"chat_{len(kpi_props)+1}")
+						filter_col = raw.get("filter_date_column") or ("x" if isinstance(expected_schema, str) and expected_schema.startswith("timeseries") else None)
+						item = {
+							"id": f"{base}:{slug}",
+							"name": raw.get("name") or "KPI",
+							"short_description": raw.get("short_description") or "",
+							"chart_type": kpi_service._normalize_chart_type(raw.get("chart_type", "bar")),
+							"d3_chart": raw.get("d3_chart") or "",
+							"expected_schema": expected_schema,
+							"sql": sql,
+							"engine": "vega-lite",
+							"vega_lite_spec": kpi_service._normalize_vega_lite_spec(raw.get("vega_lite_spec")),
+							"filter_date_column": filter_col,
+						}
+						kpi_props.append(item)
+					except Exception:
+						continue
+		return {"reply": reply, "kpis": kpi_props}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
