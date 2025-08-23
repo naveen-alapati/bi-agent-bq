@@ -48,6 +48,7 @@ class PrepareResponse(BaseModel):
 class GenerateKpisRequest(BaseModel):
 	tables: List[TableRef]
 	k: Optional[int] = 5
+	prefer_cross: Optional[bool] = False
 
 
 class KPIItem(BaseModel):

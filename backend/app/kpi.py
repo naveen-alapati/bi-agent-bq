@@ -307,17 +307,22 @@ class KPIService:
         except Exception:
             return {}
 
-    def generate_kpis(self, tables: List[TableRef], k: int = 5) -> List[KPIItem]:
-        all_items: List[KPIItem] = []
-        # Per-table KPIs (existing behavior)
+    def generate_kpis(self, tables: List[TableRef], k: int = 5, prefer_cross: bool = False) -> List[KPIItem]:
+        table_items: List[KPIItem] = []
+        cross_items: List[KPIItem] = []
+        # Per-table KPIs (existing behavior, with lower budget when preferring cross)
+        k_per_table = k
+        if prefer_cross and len(tables) >= 2:
+            # Keep per-table KPIs minimal when focusing on cross-table ideas
+            k_per_table = max(1, min(k, 2))
         for t in tables:
             try:
-                system_prompt = SYSTEM_PROMPT_TEMPLATE.format(k=k)
+                system_prompt = SYSTEM_PROMPT_TEMPLATE.format(k=k_per_table)
                 user_prompt = self._build_input_json([t])
                 result = self._coerce_llm_result(self.llm.generate_json(system_prompt, user_prompt))
             except Exception as exc:
                 if self.kpi_fallback_enabled:
-                    all_items.extend(self._fallback_kpis_for_table(t.datasetId, t.tableId, k))
+                    table_items.extend(self._fallback_kpis_for_table(t.datasetId, t.tableId, k_per_table))
                     continue
                 print(f"KPI LLM error for {t.datasetId}.{t.tableId}: {exc}")
                 continue
@@ -326,7 +331,7 @@ class KPIService:
             date_col = self._infer_date_col_from_schema(t.datasetId, t.tableId)
             count = 0
             for raw in (result.get("kpis") or []):
-                if count >= k:
+                if count >= k_per_table:
                     break
                 try:
                     sql = self._strip_code_fences(raw.get("sql", ""))
@@ -348,11 +353,11 @@ class KPIService:
                         vega_lite_spec=self._normalize_vega_lite_spec(raw.get("vega_lite_spec")),
                         filter_date_column=filter_col,
                     )
-                    all_items.append(item)
+                    table_items.append(item)
                     count += 1
                 except Exception as item_exc:
                     print(f"Skipping malformed KPI for {table_slug}: {item_exc}")
-        # Cross-table KPIs (new behavior)
+        # Cross-table KPIs
         if len(tables) >= 2:
             try:
                 primary = self._select_primary_table(tables)
@@ -386,16 +391,17 @@ class KPIService:
                             vega_lite_spec=self._normalize_vega_lite_spec(raw.get("vega_lite_spec")),
                             filter_date_column=filter_col,
                         )
-                        all_items.append(item)
+                        cross_items.append(item)
                         count += 1
                     except Exception as item_exc:
                         print(f"Skipping malformed cross-table KPI for {primary_slug}: {item_exc}")
             except Exception as exc:
                 print(f"Cross-table KPI generation error: {exc}")
-        if not all_items:
+        combined = cross_items + table_items if (prefer_cross and len(tables) >= 2) else (table_items + cross_items)
+        if not combined:
             # Return empty list rather than raising, to avoid 500 and let UI handle gracefully
             return []
-        return all_items
+        return combined
 
     def generate_custom_kpi(self, tables: List[TableRef], description: str, answers: List[str] = None) -> KPIItem:
         """

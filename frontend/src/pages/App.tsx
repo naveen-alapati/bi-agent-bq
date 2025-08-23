@@ -59,6 +59,7 @@ export default function App() {
   const [aiModalPosition, setAiModalPosition] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
+  const [preferCross, setPreferCross] = useState<boolean>(true)
   
   // Add KPI Modal state
   const [addKpiModalOpen, setAddKpiModalOpen] = useState(false)
@@ -200,7 +201,7 @@ export default function App() {
     setLoading(true)
     try {
       await api.prepare(selected, 5)
-      const kpisResp = await api.generateKpis(selected, 5)
+      const kpisResp = await api.generateKpis(selected, 5, preferCross)
       try { sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts: kpisResp, selectedTables: selected })) } catch {}
       toast('success', `Generated ${kpisResp.length} KPIs. Review and publish from KPI Draft.`)
       navigate('/kpi-draft', { state: { drafts: kpisResp, selectedTables: selected } })
@@ -573,13 +574,16 @@ export default function App() {
                   <TableSelector datasets={datasets} onChange={setSelected} />
                 </>
               )}
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
                 <button className="btn btn-primary" onClick={onAnalyze} disabled={!selected.length || loading}>
                   {loading ? 'Analyzing...' : `Analyze (${selected.length})`}
                 </button>
                 <button className="btn btn-secondary" onClick={openAddKpiModal} disabled={!selected.length}>
                   Add KPI
                 </button>
+                <label className="card-subtitle" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input type="checkbox" checked={preferCross} onChange={e => setPreferCross(e.target.checked)} /> Prefer cross-table KPIs
+                </label>
               </div>
             </div>
             <div className="panel">

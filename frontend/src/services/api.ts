@@ -13,8 +13,8 @@ export const api = {
     const r = await axios.post('/api/prepare', { tables, sampleRows })
     return r.data
   },
-  async generateKpis(tables: {datasetId: string, tableId: string}[], k = 5) {
-    const r = await axios.post('/api/generate_kpis', { tables, k })
+  async generateKpis(tables: {datasetId: string, tableId: string}[], k = 5, prefer_cross: boolean = false) {
+    const r = await axios.post('/api/generate_kpis', { tables, k, prefer_cross })
     return r.data.kpis
   },
   async runKpi(sql: string, filters?: any, date_column?: string, expected_schema?: string) {

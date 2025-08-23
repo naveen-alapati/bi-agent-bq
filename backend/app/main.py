@@ -107,7 +107,7 @@ def prepare(req: PrepareRequest):
 def generate_kpis(req: GenerateKpisRequest):
 	try:
 		k = req.k or 5
-		kpis = kpi_service.generate_kpis(req.tables, k=k)
+		kpis = kpi_service.generate_kpis(req.tables, k=k, prefer_cross=bool(getattr(req, 'prefer_cross', False)))
 		return {"kpis": kpis}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
