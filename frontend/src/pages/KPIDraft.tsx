@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../services/api'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 export default function KPIDraft() {
 	const navigate = useNavigate()
@@ -177,49 +179,7 @@ export default function KPIDraft() {
 				</div>
 			</div>
 
-			<div className="panel" style={{ gridColumn: '1 / -1' }}>
-				<div className="scroll">
-					{grouped.map(group => (
-						<div key={`${group.datasetId}.${group.tableId}`} style={{ marginBottom: 16 }}>
-							<div className="card-subtitle" style={{ marginBottom: 8 }}>{group.datasetId}.{group.tableId}</div>
-							{group.items.map(k => {
-								const meta = parseSources(k)
-								return (
-									<div key={k.id} className="list-item" style={{ alignItems: 'flex-start', gap: 8 }}>
-										<input type="checkbox" checked={!!selectedIds[k.id]} onChange={() => toggleSelect(k.id)} />
-										<div style={{ flex: 1 }}>
-											<div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-												<span>{k.name}</span>
-												{meta.cross && <span className="badge" style={{ background: 'var(--primary)', color: '#fff' }}>Cross-table</span>}
-											</div>
-											<div className="card-subtitle">Chart: {k.chart_type || 'bar'}</div>
-											{meta.sources.length > 0 && (
-												<div className="card-subtitle" style={{ marginTop: 4 }}>Sources: {meta.sources.join(', ')}</div>
-											)}
-										</div>
-										<div className="toolbar">
-											<button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
-											<button className="btn btn-sm" onClick={() => testOne(k)} disabled={testing[k.id]?.status === 'loading'}>
-												{testing[k.id]?.status === 'loading' ? 'Testing...' : 'Test SQL'}
-											</button>
-										</div>
-										<div style={{ minWidth: 160, textAlign: 'right' }}>
-											{testing[k.id]?.status === 'success' && (
-												<span className="badge" style={{ background: 'var(--accent)', color: '#fff' }}>OK {testing[k.id]?.rows ?? 0} rows</span>
-											)}
-											{testing[k.id]?.status === 'error' && (
-												<span className="badge" style={{ borderColor: 'crimson', color: 'crimson', background: 'rgba(220,20,60,0.06)' }}>Error</span>
-											)}
-										</div>
-									</div>
-								)
-							})}
-						</div>
-					))}
-				</div>
-			</div>
-
-			{/* AI Analyst Chat */}
+			{/* AI Analyst Chat - moved to top */}
 			<div className="panel" style={{ gridColumn: '1 / -1' }}>
 				<div className="section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
 					<span>AI Analyst</span>
@@ -232,7 +192,7 @@ export default function KPIDraft() {
 							{chatHistory.map((m, i) => (
 								<div key={i} style={{ marginBottom: 8 }}>
 									<div className="card-subtitle" style={{ marginBottom: 4 }}>{m.role === 'user' ? 'You' : 'Analyst'}</div>
-									<div>{m.content}</div>
+									<ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
 								</div>
 							))}
 							{chatLoading && <div className="typing"><span className="dot"></span><span className="dot"></span><span className="dot"></span></div>}
@@ -265,6 +225,68 @@ export default function KPIDraft() {
 						)}
 					</div>
 				)}
+			</div>
+
+			{/* Two-column content: left pane with all draft KPIs, right grouped detail */}
+			<div className="panel" style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '280px 1fr', gap: 12 }}>
+				<div style={{ borderRight: '1px solid var(--border)', paddingRight: 8 }}>
+					<div className="card-subtitle" style={{ marginBottom: 8 }}>All Draft KPIs</div>
+					<div className="scroll">
+						{drafts.map(k => (
+							<div key={k.id} className="list-item">
+								<div style={{ flex: 1 }}>
+									<div className="card-title" style={{ fontSize: 13 }}>{k.name}</div>
+									<div className="card-subtitle" style={{ fontSize: 12, opacity: 0.8 }}>{(k.id||'').split(':')[0]}</div>
+								</div>
+								<div className="toolbar">
+									<button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
+									<button className="btn btn-sm" onClick={() => testOne(k)} disabled={testing[k.id]?.status === 'loading'}>Test</button>
+								</div>
+							</div>
+						))}
+					</div>
+				</div>
+				<div>
+					<div className="scroll">
+						{grouped.map(group => (
+							<div key={`${group.datasetId}.${group.tableId}`} style={{ marginBottom: 16 }}>
+								<div className="card-subtitle" style={{ marginBottom: 8 }}>{group.datasetId}.{group.tableId}</div>
+								{group.items.map(k => {
+									const meta = parseSources(k)
+									return (
+										<div key={k.id} className="list-item" style={{ alignItems: 'flex-start', gap: 8 }}>
+											<input type="checkbox" checked={!!selectedIds[k.id]} onChange={() => toggleSelect(k.id)} />
+											<div style={{ flex: 1 }}>
+												<div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+													<span>{k.name}</span>
+													{meta.cross && <span className="badge" style={{ background: 'var(--primary)', color: '#fff' }}>Cross-table</span>}
+												</div>
+												<div className="card-subtitle">Chart: {k.chart_type || 'bar'}</div>
+												{meta.sources.length > 0 && (
+													<div className="card-subtitle" style={{ marginTop: 4 }}>Sources: {meta.sources.join(', ')}</div>
+												)}
+											</div>
+											<div className="toolbar">
+												<button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
+												<button className="btn btn-sm" onClick={() => testOne(k)} disabled={testing[k.id]?.status === 'loading'}>
+													{testing[k.id]?.status === 'loading' ? 'Testing...' : 'Test SQL'}
+												</button>
+											</div>
+											<div style={{ minWidth: 160, textAlign: 'right' }}>
+												{testing[k.id]?.status === 'success' && (
+													<span className="badge" style={{ background: 'var(--accent)', color: '#fff' }}>OK {testing[k.id]?.rows ?? 0} rows</span>
+												)}
+												{testing[k.id]?.status === 'error' && (
+													<span className="badge" style={{ borderColor: 'crimson', color: 'crimson', background: 'rgba(220,20,60,0.06)' }}>Error</span>
+												)}
+											</div>
+										</div>
+									)
+								})}
+							</div>
+						))}
+					</div>
+				</div>
 			</div>
 		</div>
 	)
