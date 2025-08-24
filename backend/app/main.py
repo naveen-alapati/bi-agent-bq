@@ -11,6 +11,7 @@ import io
 import zipfile
 from google.cloud import bigquery
 import json
+import re
 
 from .bq import BigQueryService
 from .embeddings import EmbeddingMode, EmbeddingService
@@ -524,18 +525,71 @@ def analyst_chat(req: AnalystChatRequest):
 	Chat with an AI Analyst. Returns reply and optional KPI proposals.
 	"""
 	try:
+		# Pre-validate KPIs to ensure they are BigQuery-compatible
+		valid_kpis = []
+		for kpi in req.kpis:
+			sql = kpi.get('sql', '')
+			if not sql:
+				continue
+			# Check if SQL contains required aliases for expected_schema
+			expected_schema = kpi.get('expected_schema')
+			if isinstance(expected_schema, str):
+				if "timeseries" in expected_schema and "x" not in sql:
+					continue
+				if "categorical" in expected_schema and "label" not in sql:
+					continue
+				if "distribution" in expected_schema and "label" not in sql:
+					continue
+				if "timeseries" in expected_schema and "y" not in sql:
+					continue
+				if "categorical" in expected_schema and "value" not in sql:
+					continue
+				if "distribution" in expected_schema and "value" not in sql:
+					continue
+				if "timeseries" in expected_schema and "x" not in sql and "y" not in sql:
+					continue
+				if "categorical" in expected_schema and "label" not in sql and "value" not in sql:
+					continue
+				if "distribution" in expected_schema and "label" not in sql and "value" not in sql:
+					continue
+
+			# Check if SQL uses SAFE_DIVIDE for ratios
+			if " / " in sql or " /" in sql or "/ " in sql or "/":
+				if "SAFE_DIVIDE" not in sql:
+					continue
+
+			# Check if SQL uses SELECT *
+			if "SELECT *" in sql:
+				continue
+
+			# Check if SQL uses fully-qualified tables
+			if not re.search(r"`[\w\-]+\.[\w\-]+\.[\w\-]+`", sql):
+				continue
+
+			valid_kpis.append(kpi)
+
 		# Build system prompt focusing on cross-table value and guidance when insufficient data
 		sys = (
 			"You are a senior data analyst with 20 years of experience. Be practical and concise. "
 			"Goal: help the user generate high-value KPIs. Prefer cross-table KPIs when multiple tables are available. "
 			"If joins are not possible due to missing keys, explicitly state which keys/dimensions are needed. "
-			"Output JSON with keys: 'reply' (markdown guidance) and optional 'kpis' (array of KPI objects: id slug, name, short_description, chart_type, expected_schema, sql, engine, vega_lite_spec, filter_date_column)."
+			"Return JSON only with keys: 'reply' (markdown guidance) and optional 'kpis' (array of KPI objects). Each KPI MUST include: id, name, short_description, chart_type, expected_schema, sql, engine, vega_lite_spec, filter_date_column when applicable. "
+			"Rules: Use BigQuery Standard SQL; ensure aliases match expected_schema (timeseries: x,y; categorical/distribution: label,value); always use SAFE_DIVIDE for ratios; avoid SELECT *; use fully-qualified tables as `project.dataset.table`; only use existing columns."
 		)
 		user = {
 			"message": req.message,
 			"prefer_cross": bool(req.prefer_cross),
 			"tables": [t.model_dump() if hasattr(t, 'model_dump') else dict(t) for t in req.tables],
-			"current_kpis": [k.model_dump() if hasattr(k, 'model_dump') else dict(k) for k in req.kpis],
+			"table_context": [
+				{
+					"datasetId": t.datasetId,
+					"tableId": t.tableId,
+					"schema": (kpi_service.bq.get_table_schema(t.datasetId, t.tableId) if hasattr(kpi_service, 'bq') else []),
+					"sample_rows": (kpi_service.bq.sample_rows(t.datasetId, t.tableId, limit=3) if hasattr(kpi_service, 'bq') else []),
+				}
+				for t in req.tables
+			],
+			"current_kpis": [k.model_dump() if hasattr(k, 'model_dump') else dict(k) for k in valid_kpis],
 			"history": [h.model_dump() if hasattr(h, 'model_dump') else dict(h) for h in (req.history or [])][-10:]
 		}
 		resp = llm_client.generate_json(sys, json.dumps(user))
