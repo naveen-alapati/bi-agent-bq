@@ -47,10 +47,10 @@ export default function KPIDraft() {
 	}, [drafts, selectedTables])
 
 	useEffect(() => {
-		// Send initial message to Analyst with current drafts
+		// Send initial message to Analyst with current drafts and selected tables
 		if (chatHistory.length === 0 && drafts.length > 0) {
 			setTimeout(() => {
-				void sendChat("We have generated the following KPIs. Please propose high-value cross-table KPIs and tell us what additional data or keys are required if joins are insufficient.")
+				void sendChat("We have generated the following KPIs. Please propose high-value cross-table KPIs with runnable BigQuery SQL using provided table schemas and sample rows. If joins are insufficient, specify required keys.")
 			}, 0)
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps

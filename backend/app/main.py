@@ -543,10 +543,16 @@ def analyst_chat(req: AnalystChatRequest):
 			"If joins are not possible due to missing keys, explicitly state which keys/dimensions are needed. "
 			"Output JSON with keys: 'reply' (markdown guidance) and optional 'kpis' (array of KPI objects: id slug, name, short_description, chart_type, expected_schema, sql, engine, vega_lite_spec, filter_date_column)."
 		)
+		# Build table context (schema, samples, similar docs) from embeddings
+		try:
+			table_context = json.loads(kpi_service._build_input_json(req.tables))
+		except Exception:
+			table_context = {}
 		user = {
 			"message": req.message,
 			"prefer_cross": bool(req.prefer_cross),
 			"tables": [t.model_dump() if hasattr(t, 'model_dump') else dict(t) for t in req.tables],
+			"table_context": table_context,
 			"current_kpis": [k.model_dump() if hasattr(k, 'model_dump') else dict(k) for k in req.kpis],
 			"history": [h.model_dump() if hasattr(h, 'model_dump') else dict(h) for h in (req.history or [])][-10:]
 		}
