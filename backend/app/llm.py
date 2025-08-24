@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Optional
 import os
 import json
 import requests
+import re
 
 
 class LLMClient:
@@ -48,13 +49,27 @@ class LLMClient:
         return json.loads(text)
 
     def _parse_json_text(self, text: str) -> Dict[str, Any]:
-        s = text.strip()
-        # strip code fences if present
+        s = (text or "").strip()
+        # Strip code fences if present
         if s.startswith("```"):
-            s = s.strip('`')
-            if s.startswith("json"):
-                s = s[4:].strip()
-        return json.loads(s)
+            # remove leading/backtick fences and optional language tag
+            s = re.sub(r"^```(json)?", "", s, flags=re.IGNORECASE).strip()
+            if s.endswith("```"):
+                s = s[:-3].strip()
+        # If the entire payload is quoted JSON, unquote once
+        if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+            try:
+                s = json.loads(s)
+            except Exception:
+                pass
+        # If still not a dict after direct parse, attempt to extract first JSON object
+        try:
+            return json.loads(s)
+        except Exception:
+            match = re.search(r"\{[\s\S]*\}", s)
+            if match:
+                return json.loads(match.group(0))
+            raise
 
     def _generate_gemini(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         if not self.gemini_api_key:
@@ -78,8 +93,12 @@ class LLMClient:
         if resp.status_code != 200:
             raise RuntimeError(f"Gemini API error {resp.status_code}: {resp.text}")
         data = resp.json()
+        # Try multiple extraction strategies for robustness
         try:
-            text = data["candidates"][0]["content"]["parts"][0]["text"]
+            text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            if not text:
+                # Some variants may return 'content' as a direct string or nested dict
+                text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("functionCall", {}).get("args", "") or json.dumps(data)
             return self._parse_json_text(text)
         except Exception as exc:
             raise RuntimeError(f"Failed to parse Gemini response: {data}") from exc
@@ -114,7 +133,12 @@ class LLMClient:
             resp = requests.post(f"{endpoint}?key={self.gemini_api_key}", headers=headers, data=json.dumps(body), timeout=20)
             data = resp.json()
             text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
-            return json.loads(text).get("sql", original_sql)
+            try:
+                return json.loads(text).get("sql", original_sql)
+            except Exception:
+                # last resort, try to find a JSON object in the text
+                m = re.search(r"\{[\s\S]*\}", text)
+                return (json.loads(m.group(0)).get("sql", original_sql) if m else original_sql)
         raise RuntimeError("Unsupported provider for edit_sql")
 
     def diagnostics(self) -> Dict[str, Any]:
