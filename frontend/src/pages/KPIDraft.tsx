@@ -34,7 +34,6 @@ export default function KPIDraft() {
 	const [testing, setTesting] = useState<Record<string, { status: 'idle'|'loading'|'success'|'error'; rows?: number; error?: string }>>({})
 	const [publishing, setPublishing] = useState(false)
 	// Analyst chat state
-	const [chatOpen, setChatOpen] = useState(true)
 	const [chatHistory, setChatHistory] = useState<{ role: 'user'|'assistant'; content: string }[]>([])
 	const [chatInput, setChatInput] = useState('')
 	const [chatLoading, setChatLoading] = useState(false)
@@ -163,29 +162,68 @@ export default function KPIDraft() {
 	}
 
 	return (
-		<div className="app-grid">
-			<div className="panel" style={{ gridColumn: '1 / -1' }}>
-				<div className="section-title">KPI Draft</div>
-				<div className="toolbar" style={{ gap: 8 }}>
-					<button className="btn" onClick={() => navigate('/editor')}>Back to Editor</button>
-					<button className="btn" onClick={() => selectAll(true)}>Select All</button>
-					<button className="btn" onClick={() => selectAll(false)}>Clear</button>
-					<button className="btn btn-primary" onClick={publishSelected} disabled={publishing}>
-						{publishing ? 'Publishing...' : 'Publish Selected to KPI Catalog'}
-					</button>
-					<div className="card-subtitle" style={{ marginLeft: 'auto' }}>
-						Selected: {Object.values(selectedIds).filter(Boolean).length} / {drafts.length}
+		<div className="app-grid" style={{ gridTemplateColumns: '1fr var(--sidebar-w, 320px)' }}>
+			<div style={{ display: 'grid', gap: 12 }}>
+				<div className="panel">
+					<div className="card-subtitle" style={{ marginBottom: 8 }}>All Draft KPIs</div>
+					<div className="scroll">
+						{drafts.map(k => (
+							<div key={k.id} className="list-item">
+								<div style={{ flex: 1 }}>
+									<div className="card-title" style={{ fontSize: 13 }}>{k.name}</div>
+									<div className="card-subtitle" style={{ fontSize: 12, opacity: 0.8 }}>{(k.id||'').split(':')[0]}</div>
+								</div>
+								<div className="toolbar" style={{ gap: 6, alignItems: 'center' }}>
+									<button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View</button>
+									<button className="btn btn-sm" onClick={() => testOne(k)} disabled={testing[k.id]?.status === 'loading'}>Test</button>
+									{testing[k.id]?.status === 'success' && <span style={{ color: 'green', fontSize: 12 }}>OK</span>}
+									{testing[k.id]?.status === 'error' && <span style={{ color: 'crimson', fontSize: 12 }}>Error</span>}
+								</div>
+							</div>
+						))}
 					</div>
 				</div>
 			</div>
 
-			{/* AI Analyst Chat - moved to top */}
-			<div className="panel" style={{ gridColumn: '1 / -1' }}>
-				<div className="section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-					<span>AI Analyst</span>
-					<button className="btn btn-sm" onClick={() => setChatOpen(o => !o)}>{chatOpen ? 'Hide' : 'Show'}</button>
+			<div className="sidebar" style={{ display: 'grid', gap: 12 }}>
+				<div className="panel">
+					<div className="section-title">Proposed KPIs</div>
+					<div className="toolbar" style={{ gap: 8 }}>
+						<button className="btn" onClick={() => navigate('/editor')}>Back to Editor</button>
+						<button className="btn" onClick={() => selectAll(true)}>Select All</button>
+						<button className="btn" onClick={() => selectAll(false)}>Clear</button>
+						<button className="btn btn-primary" onClick={publishSelected} disabled={publishing}>
+							{publishing ? 'Publishing...' : 'Publish Selected to KPI Catalog'}
+						</button>
+						<div className="card-subtitle" style={{ marginLeft: 'auto' }}>
+							Selected: {Object.values(selectedIds).filter(Boolean).length} / {drafts.length}
+						</div>
+					</div>
+					<div className="scroll" style={{ marginTop: 8 }}>
+						{Array.isArray(chatProposals) && chatProposals.length > 0 ? (
+							chatProposals.map((k: any) => (
+								<div key={k.id} className="list-item">
+									<div style={{ flex: 1 }}>
+										<div className="card-title">{k.name}</div>
+										<div className="card-subtitle">Chart: {k.chart_type}</div>
+									</div>
+									<div className="toolbar">
+										<button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
+										<button className="btn btn-sm" onClick={() => addProposalToDrafts(k)}>Add to Drafts</button>
+									</div>
+								</div>
+							))
+						) : (
+							<div className="card-subtitle">No proposals yet. Ask the analyst to propose cross-table KPIs.</div>
+						)}
+					</div>
+					<div className="toolbar" style={{ marginTop: 8 }}>
+						<button className="btn" onClick={analyzeSimilar}>Analyze similar</button>
+					</div>
 				</div>
-				{false && (
+
+				<div className="panel">
+					<div className="section-title">AI Analyst</div>
 					<div style={{ display: 'grid', gap: 8 }}>
 						<div className="card-subtitle">Ask for cross-table KPIs or guidance. The analyst sees your generated KPIs and tables.</div>
 						<div style={{ maxHeight: 240, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
@@ -201,50 +239,7 @@ export default function KPIDraft() {
 							<input className="input" placeholder="Ask the analyst..." value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key==='Enter') sendChat() }} style={{ flex: 1 }} />
 							<button className="btn btn-primary" onClick={() => sendChat()} disabled={chatLoading}>Send</button>
 						</div>
-						{Array.isArray(chatProposals) && chatProposals.length > 0 && (
-							<div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-								<div className="card-subtitle" style={{ marginBottom: 8 }}>Proposed KPIs</div>
-								<div className="scroll">
-									{chatProposals.map((k: any) => (
-										<div key={k.id} className="list-item">
-											<div style={{ flex: 1 }}>
-												<div className="card-title">{k.name}</div>
-												<div className="card-subtitle">Chart: {k.chart_type}</div>
-											</div>
-											<div className="toolbar">
-												<button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
-												<button className="btn btn-sm" onClick={() => addProposalToDrafts(k)}>Add to Drafts</button>
-											</div>
-										</div>
-									))}
-								</div>
-								<div className="toolbar" style={{ marginTop: 8 }}>
-									<button className="btn" onClick={analyzeSimilar}>Analyze similar</button>
-								</div>
-							</div>
-						)}
 					</div>
-				)}
-			</div>
-
-			{/* Full-width content: left pane only */}
-			<div className="panel" style={{ gridColumn: '1 / -1' }}>
-				<div className="card-subtitle" style={{ marginBottom: 8 }}>All Draft KPIs</div>
-				<div className="scroll">
-					{drafts.map(k => (
-						<div key={k.id} className="list-item">
-							<div style={{ flex: 1 }}>
-								<div className="card-title" style={{ fontSize: 13 }}>{k.name}</div>
-								<div className="card-subtitle" style={{ fontSize: 12, opacity: 0.8 }}>{(k.id||'').split(':')[0]}</div>
-							</div>
-							<div className="toolbar" style={{ gap: 6, alignItems: 'center' }}>
-								<button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View</button>
-								<button className="btn btn-sm" onClick={() => testOne(k)} disabled={testing[k.id]?.status === 'loading'}>Test</button>
-								{testing[k.id]?.status === 'success' && <span style={{ color: 'green', fontSize: 12 }}>OK</span>}
-								{testing[k.id]?.status === 'error' && <span style={{ color: 'crimson', fontSize: 12 }}>Error</span>}
-							</div>
-						</div>
-					))}
 				</div>
 			</div>
 		</div>
