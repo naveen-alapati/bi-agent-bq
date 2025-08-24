@@ -162,7 +162,7 @@ export default function KPIDraft() {
 	}
 
 	return (
-		<div className="app-grid" style={{ gridTemplateColumns: '1fr var(--sidebar-w, 320px)' }}>
+		<div className="app-grid" style={{ gridTemplateColumns: 'var(--sidebar-w, 320px) 1fr' }}>
 			<div style={{ display: 'grid', gap: 12 }}>
 				<div className="panel">
 					<div className="card-subtitle" style={{ marginBottom: 8 }}>All Draft KPIs</div>
