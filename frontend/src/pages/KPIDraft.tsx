@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../services/api'
 import ReactMarkdown from 'react-markdown'
@@ -38,6 +38,7 @@ export default function KPIDraft() {
 	const [chatInput, setChatInput] = useState('')
 	const [chatLoading, setChatLoading] = useState(false)
 	const [chatProposals, setChatProposals] = useState<any[] | null>(null)
+	const chatScrollRef = useRef<HTMLDivElement | null>(null)
 
 	useEffect(() => {
 		try {
@@ -54,6 +55,11 @@ export default function KPIDraft() {
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [])
+
+	useEffect(() => {
+		const el = chatScrollRef.current
+		if (el) el.scrollTop = el.scrollHeight
+	}, [chatHistory, chatLoading])
 
 	function parseSources(k: any): { cross: boolean; sources: string[] } {
 		try {
@@ -237,7 +243,7 @@ export default function KPIDraft() {
 					<div className="section-title">AI Analyst</div>
 					<div style={{ display: 'grid', gap: 8 }}>
 						<div className="card-subtitle">Ask for cross-table KPIs or guidance. The analyst sees your generated KPIs and tables.</div>
-						<div style={{ maxHeight: 240, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
+						<div ref={chatScrollRef} style={{ maxHeight: 240, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
 							{chatHistory.map((m, i) => (
 								<div key={i} style={{ marginBottom: 8 }}>
 									<div className="card-subtitle" style={{ marginBottom: 4 }}>{m.role === 'user' ? 'You' : 'Analyst'}</div>
@@ -247,7 +253,15 @@ export default function KPIDraft() {
 							{chatLoading && <div className="typing"><span className="dot"></span><span className="dot"></span><span className="dot"></span></div>}
 						</div>
 						<div className="toolbar">
-							<input className="input" placeholder="Ask the analyst..." value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key==='Enter') sendChat() }} style={{ flex: 1 }} />
+							<textarea
+								className="input"
+								placeholder="Ask the analyst..."
+								value={chatInput}
+								onChange={e => setChatInput(e.target.value)}
+								onKeyDown={e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }}
+								rows={4}
+								style={{ flex: 1, minHeight: 150, resize: 'vertical' }}
+							/>
 							<button className="btn btn-primary" onClick={() => sendChat()} disabled={chatLoading}>Send</button>
 						</div>
 					</div>

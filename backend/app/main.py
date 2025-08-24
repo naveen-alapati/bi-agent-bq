@@ -187,17 +187,29 @@ def run_kpi(req: RunKpiRequest):
 			return {"rows": rows}
 		except Exception as inner_exc:
 			msg = str(inner_exc).lower()
-			# BigQuery division-by-zero errors may mention divide by zero / invalid / safe divide
-			if "divide by zero" in msg or "division by zero" in msg:
+			# Add deterministic SAFE_DIVIDE rewrite as a fallback in addition to LLM edit
+			def _rewrite_safe_divide(q: str) -> str:
+				import re as _re
+				# Naive replacement of a/b with SAFE_DIVIDE(a,b) when not already wrapped
+				pattern = r"(?<!SAFE_DIVIDE\()(?P<a>[A-Za-z0-9_\.\)\]]+)\s*/\s*(?P<b>[A-Za-z0-9_\.\(\[]+)"
+				def _repl(m):
+					return f"SAFE_DIVIDE({m.group('a')}, {m.group('b')})"
+				return _re.sub(pattern, _repl, q, flags=_re.IGNORECASE)
+			should_try_fix = ("divide by zero" in msg) or ("division by zero" in msg) or ("invalid" in msg and "/" in sql)
+			if should_try_fix:
 				try:
 					# Ask LLM to rewrite with SAFE_DIVIDE while preserving schema/aliases
 					fixed_sql = kpi_service.llm.edit_sql(sql, "Rewrite to use SAFE_DIVIDE for all divisions; preserve output columns and aliases.")
 					rows = _run_query(fixed_sql)
 					return {"rows": rows}
 				except Exception:
-					# Fall through to raise original error if retry fails
-					pass
-			# If not a divide-by-zero or retry failed, rethrow the original
+					# Deterministic fallback: naive SAFE_DIVIDE rewrite
+					try:
+						rows = _run_query(_rewrite_safe_divide(sql))
+						return {"rows": rows}
+					except Exception:
+						pass
+			# If not a divide-by-zero or all retries failed, rethrow the original
 			raise inner_exc
 	except Exception as exc:
 		raise HTTPException(status_code=400, detail=str(exc))
