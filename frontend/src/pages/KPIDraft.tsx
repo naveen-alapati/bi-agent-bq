@@ -153,6 +153,16 @@ export default function KPIDraft() {
 		setChatProposals(ps => (Array.isArray(ps) ? ps.filter(x => x.id !== k.id) : null))
 	}
 
+	function removeDraftToProposals(k: any) {
+		setDrafts(prev => prev.filter(d => d.id !== k.id))
+		setSelectedIds(prev => { const copy = { ...prev }; try { delete copy[k.id] } catch {} return copy })
+		setChatProposals(ps => {
+			const arr = Array.isArray(ps) ? ps : []
+			const without = arr.filter(x => x.id !== k.id)
+			return [...without, k]
+		})
+	}
+
 	async function analyzeSimilar() {
 		try {
 			await api.prepare(selectedTables, 5)
@@ -175,9 +185,7 @@ export default function KPIDraft() {
 								</div>
 								<div className="toolbar" style={{ gap: 6, alignItems: 'center' }}>
 									<button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View</button>
-									<button className="btn btn-sm" onClick={() => testOne(k)} disabled={testing[k.id]?.status === 'loading'}>Test</button>
-									{testing[k.id]?.status === 'success' && <span style={{ color: 'green', fontSize: 12 }}>OK</span>}
-									{testing[k.id]?.status === 'error' && <span style={{ color: 'crimson', fontSize: 12 }}>Error</span>}
+									<button className="btn btn-sm" onClick={() => removeDraftToProposals(k)}>Remove</button>
 								</div>
 							</div>
 						))}
@@ -207,10 +215,13 @@ export default function KPIDraft() {
 										<div className="card-title">{k.name}</div>
 										<div className="card-subtitle">Chart: {k.chart_type}</div>
 									</div>
-									<div className="toolbar">
-										<button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
-										<button className="btn btn-sm" onClick={() => addProposalToDrafts(k)}>Add to Drafts</button>
-									</div>
+																	<div className="toolbar">
+									<button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
+									<button className="btn btn-sm" onClick={() => addProposalToDrafts(k)}>Add to Drafts</button>
+									<button className="btn btn-sm" onClick={() => testOne(k)} disabled={testing[k.id]?.status === 'loading'}>Test</button>
+									{testing[k.id]?.status === 'success' && <span style={{ color: 'green', fontSize: 12 }}>OK</span>}
+									{testing[k.id]?.status === 'error' && <span style={{ color: 'crimson', fontSize: 12 }}>Error</span>}
+								</div>
 								</div>
 							))
 						) : (
