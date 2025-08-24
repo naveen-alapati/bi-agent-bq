@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import embed, { VisualizationSpec, Result } from 'vega-embed'
 import { ChartCanvas } from './ChartCanvas'
 
-export function ChartRenderer({ chart, rows, onSelect }: { chart: any, rows: any[], onSelect?: (payload: any) => void }) {
+export function ChartRenderer({ chart, rows, onSelect, onError }: { chart: any, rows: any[], onSelect?: (payload: any) => void, onError?: (err: { type: string; message: string; raw?: any }) => void }) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const vegaRef = useRef<HTMLDivElement | null>(null)
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
@@ -43,9 +43,11 @@ export function ChartRenderer({ chart, rows, onSelect }: { chart: any, rows: any
         })
       }).catch((e) => {
         console.error('vega-embed error', e, chart)
+        onError && onError({ type: 'VegaEmbedError', message: String(e?.message || e), raw: e })
       })
-    } catch (e) {
+    } catch (e: any) {
       console.error('vega spec parse error', e, chart)
+      onError && onError({ type: 'VegaSpecParseError', message: String(e?.message || e), raw: e })
     }
     return () => {
       try { result && result.view && result.view.finalize && result.view.finalize() } catch {}

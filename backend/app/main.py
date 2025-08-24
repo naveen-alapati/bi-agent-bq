@@ -212,7 +212,21 @@ def run_kpi(req: RunKpiRequest):
 			# If not a divide-by-zero or all retries failed, rethrow the original
 			raise inner_exc
 	except Exception as exc:
-		raise HTTPException(status_code=400, detail=str(exc))
+		# Return structured error payload to help frontend and AI Edit
+		err_detail: Dict[str, Any] = {
+			"type": exc.__class__.__name__,
+			"message": str(exc),
+			"rawMessage": repr(exc),
+			"sql": sql,
+		}
+		try:
+			# BigQuery exceptions may include .errors list
+			errors = getattr(exc, "errors", None)
+			if errors:
+				err_detail["errors"] = errors
+		except Exception:
+			pass
+		raise HTTPException(status_code=400, detail=err_detail)
 
 
 @app.post("/api/sql/edit")

@@ -104,7 +104,16 @@ export default function KPIDraft() {
 			const rows = await api.runKpi(kpi.sql, undefined, kpi.filter_date_column, kpi.expected_schema)
 			setTesting(prev => ({ ...prev, [kpi.id]: { status: 'success', rows: rows?.length || 0 } }))
 		} catch (e: any) {
+			const errDetail = e?.response?.data?.detail || e?.message || e
 			setTesting(prev => ({ ...prev, [kpi.id]: { status: 'error', error: String(e?.response?.data?.detail || e?.message || e) } }))
+			// Feed failure to AI Analyst to propose a fix
+			try {
+				const msg = `Test failed for KPI "${kpi.name}". Here is the structured error and SQL. Please provide a fixed SQL that preserves required aliases.\n\nError JSON:\n\n\n\`${JSON.stringify(errDetail, null, 2)}\`\n\nSQL:\n\n\n\`${kpi.sql}\``
+				const res = await api.analystChat(msg, drafts, selectedTables, chatHistory, true)
+				setChatHistory(prev => [...prev, { role: 'user', content: msg }])
+				if (res.reply) setChatHistory(prev => [...prev, { role: 'assistant', content: res.reply }])
+				if (Array.isArray(res.kpis) && res.kpis.length) setChatProposals(res.kpis)
+			} catch {}
 		}
 	}
 

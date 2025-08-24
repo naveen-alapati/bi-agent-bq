@@ -60,6 +60,7 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const [preferCross, setPreferCross] = useState<boolean>(true)
+  const [chartErrorsByKpi, setChartErrorsByKpi] = useState<Record<string, any>>({})
   
   // Add KPI Modal state
   const [addKpiModalOpen, setAddKpiModalOpen] = useState(false)
@@ -70,6 +71,8 @@ export default function App() {
   const [addKpiGeneratedKpi, setAddKpiGeneratedKpi] = useState<any>(null)
   const [addKpiStep, setAddKpiStep] = useState<'description' | 'clarifying' | 'generated'>('description')
   const [addKpiEditedSql, setAddKpiEditedSql] = useState('')
+  const [addKpiTestResult, setAddKpiTestResult] = useState<any>(null)
+  const [addKpiTesting, setAddKpiTesting] = useState(false)
 
   function applyPalette(p: { primary: string; accent: string; surface: string; warn: string }) {
     const r = document.documentElement
@@ -217,8 +220,17 @@ export default function App() {
     const filters = {
       date: globalDate,
     }
-    const res = await api.runKpi(kpi.sql, filters, kpi.filter_date_column, kpi.expected_schema)
-    setRowsByKpi(prev => ({...prev, [kpi.id]: res}))
+    try {
+      const res = await api.runKpi(kpi.sql, filters, kpi.filter_date_column, kpi.expected_schema)
+      setRowsByKpi(prev => ({...prev, [kpi.id]: res}))
+    } catch (e: any) {
+      // store structured error and auto-open AI Edit
+      const errDetail = e?.response?.data?.detail || e?.message || e
+      setChartErrorsByKpi(prev => ({ ...prev, [kpi.id]: { runError: errDetail } }))
+      setAiEditKpi(kpi)
+      setAiChat([{ role: 'assistant', text: 'I saw a run error. I will help fix this KPI. Provide constraints or desired output if any.' }])
+      setAiEditOpen(true)
+    }
   }
 
 
@@ -518,7 +530,8 @@ export default function App() {
     setAiInput('')
     const history = aiChat.map(m => ({ role: m.role, content: m.text }))
     setAiTyping(true)
-    const res = await api.editKpiChat(aiEditKpi, msg, history)
+    const ctx = { rows: rowsByKpi[aiEditKpi.id] || [], error: chartErrorsByKpi[aiEditKpi.id]?.runError || null, chart_error: chartErrorsByKpi[aiEditKpi.id]?.chartError || null }
+    const res = await api.editKpiChat(aiEditKpi, msg, history, ctx)
     if (res.reply) setAiChat(prev => [...prev, { role: 'assistant', text: res.reply }])
     if (res.kpi) {
       const idx = kpis.findIndex(x => x.id === aiEditKpi.id)
@@ -771,7 +784,7 @@ export default function App() {
                     <button className="btn btn-sm" onClick={() => { const nextKpis = kpis.filter(x => x.id !== k.id); const nextLayout = (activeLayout||[]).filter(l => l.i !== k.id); setKpis(nextKpis); setLayouts(nextLayout); setTabLayouts(prev => ({ ...prev, [activeTab]: nextLayout })); setDirty(true) }}>Remove</button>
                   </div>
                 </div>
-                <div style={{ flex: 1, padding: 8 }} className="no-drag"><ChartRenderer chart={k} rows={rowsByKpi[k.id] || []} onSelect={(p) => setCrossFilter(p)} /></div>
+                <div style={{ flex: 1, padding: 8 }} className="no-drag"><ChartRenderer chart={k} rows={rowsByKpi[k.id] || []} onSelect={(p) => setCrossFilter(p)} onError={(err) => setChartErrorsByKpi(prev => ({ ...prev, [k.id]: { ...(prev[k.id]||{}), chartError: err } }))} /></div>
               </div>
             ))}
           </GridLayout>
