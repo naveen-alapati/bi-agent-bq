@@ -26,6 +26,8 @@ function unique<T>(arr: T[]): T[] {
 
 export function computeKpiLineage(sql: string, kpi?: any): Lineage {
   const text = String(sql || '')
+  // Build alias map from FROM and JOIN clauses: alias -> full table
+  const aliasToTable: Record<string, string> = {}
   const sources: string[] = []
   const joins: LineageJoin[] = []
   let filters: string[] | undefined
@@ -36,18 +38,54 @@ export function computeKpiLineage(sql: string, kpi?: any): Lineage {
   try {
     const backticked = [...text.matchAll(/`([\w-]+\.[\w-]+\.[\w-]+)`/g)].map(m => m[1])
     sources.push(...backticked)
+    const fromJoin = [...text.matchAll(/\b(from|join)\s+([`\w.-]+)(?:\s+as)?\s+(\w+)/ig)]
+    for (const m of fromJoin) {
+      const raw = (m[2] || '').replace(/[`]/g, '')
+      const alias = (m[3] || '').trim()
+      if (raw && alias) aliasToTable[alias] = raw
+      if (raw) sources.push(raw)
+    }
     const simpleFromJoin = [...text.matchAll(/\b(?:from|join)\s+([\w-]+\.[\w-]+)(?:\s+|\b)/ig)].map(m => m[1])
     sources.push(...simpleFromJoin)
   } catch {}
 
   try {
-    const joinRegex = /join\s+[`]?([\w-]+\.[\w-]+\.[\w-]+)[`]?[^]*?\bon\s+([^\n\r]+?)(?=\n|\r|\bwhere\b|\bgroup\s+by\b|\border\s+by\b|\blimit\b|$)/ig
+    // Capture JOIN ... ON ... blocks across newlines until next keyword
+    const joinOnRegex = /\bjoin\s+([`\w.-]+)(?:\s+as)?\s+(\w+)?[\s\S]*?\bon\s+([\s\S]*?)(?=\bjoin\b|\bwhere\b|\bgroup\s+by\b|\border\s+by\b|\blimit\b|$)/ig
     let m: RegExpExecArray | null
-    while ((m = joinRegex.exec(text)) !== null) {
-      const on = (m[2] || '').trim()
+    while ((m = joinOnRegex.exec(text)) !== null) {
+      const rightTableRaw = (m[1] || '').replace(/[`]/g, '')
+      const rightAlias = (m[2] || '').trim()
+      const on = (m[3] || '').replace(/\s+/g, ' ').trim()
+      // Handle USING(col) syntax
+      const using = on.match(/\busing\s*\(([^)]+)\)/i)
+      if (using) {
+        const cols = using[1].split(',').map(s => s.trim())
+        for (const col of cols) {
+          // Try to infer two most recent aliases; fallback to raw table
+          const aliases = Object.keys(aliasToTable)
+          const leftAlias = aliases[0]
+          const rightAliasSel = rightAlias || aliases[1]
+          const left = (leftAlias ? `${leftAlias}.${col}` : col).replace(/[`]/g, '')
+          const right = (rightAliasSel ? `${rightAliasSel}.${col}` : `${rightTableRaw}.${col}`).replace(/[`]/g, '')
+          joins.push({ left, right, on })
+        }
+        continue
+      }
+      // Handle a = b expressions; may include aliases
       const eq = on.match(/([\w`.]+)\s*=\s*([\w`.]+)/)
       if (eq) {
-        joins.push({ left: eq[1].replace(/[`]/g, ''), right: eq[2].replace(/[`]/g, ''), on })
+        const normalize = (s: string) => {
+          const t = s.replace(/[`]/g, '')
+          const parts = t.split('.')
+          if (parts.length === 2) {
+            const [alias, col] = parts
+            const full = aliasToTable[alias]
+            return full ? `${alias}.${col}` : t
+          }
+          return t
+        }
+        joins.push({ left: normalize(eq[1]), right: normalize(eq[2]), on })
       } else {
         joins.push({ left: '', right: '', on })
       }
