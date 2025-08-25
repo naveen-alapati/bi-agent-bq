@@ -27,6 +27,55 @@ def _collect_tables(expr: exp.Expression) -> List[str]:
     return sorted([t for t in tables if t])
 
 
+def _build_alias_map(expr: exp.Expression, sources: List[str]) -> Dict[str, str]:
+    """Map table aliases and short names to fully-qualified table ids.
+    Includes CTE/table short names so alias resolution works for columns like cte.col or alias.col.
+    """
+    alias_to_table: Dict[str, str] = {}
+    # Table aliases
+    for t in expr.find_all(exp.Table):
+        try:
+            alias_expr = t.args.get("alias")
+            if alias_expr and getattr(alias_expr, "this", None):
+                alias_name = alias_expr.this.name
+                fq = _fq_table(t)
+                if alias_name and fq:
+                    alias_to_table[alias_name] = fq
+        except Exception:
+            continue
+    # Short names for all discovered sources (table id last segment)
+    for s in sources:
+        short = s.split(".")[-1]
+        if short and short not in alias_to_table:
+            alias_to_table[short] = s
+    return alias_to_table
+
+
+def _clean_identifier(s: str) -> str:
+    return s.replace('"', '').replace('`', '')
+
+
+def _infer_table_from_column(col_id: str, alias_to_table: Dict[str, str]) -> Optional[str]:
+    """Best-effort mapping from a column id string to a table id using alias map.
+    Accepts forms like alias.col, db.table.col, project.db.table.col
+    """
+    raw = _clean_identifier(col_id)
+    parts = raw.split(".")
+    if len(parts) >= 4:
+        # project.dataset.table.column
+        return ".".join(parts[:3])
+    if len(parts) == 3:
+        # db.table.column
+        return ".".join(parts[:2])
+    if len(parts) == 2:
+        qual = parts[0]
+        if qual in alias_to_table:
+            return alias_to_table[qual]
+        # Could be table.column without alias
+        return alias_to_table.get(qual)
+    return None
+
+
 def _join_details(expr: exp.Expression) -> List[Dict[str, Any]]:
     joins: List[Dict[str, Any]] = []
     for j in expr.find_all(exp.Join):
@@ -170,6 +219,7 @@ def compute_lineage(sql: str, dialect: str = "bigquery") -> Dict[str, Any]:
             qualified = parsed
 
     sources = _collect_tables(qualified)
+    alias_map = _build_alias_map(qualified, sources)
     joins = _join_details(qualified)
     filters = _collect_filters(qualified)
     group_by = _collect_group_by(qualified)
@@ -193,6 +243,22 @@ def compute_lineage(sql: str, dialect: str = "bigquery") -> Dict[str, Any]:
             pass
     nodes.extend(col_nodes)
     edges.extend(col_edges)
+
+    # Connect columns to their owning tables (contains edges)
+    for n in col_nodes:
+        nid = n.get("id") or ""
+        table_id = _infer_table_from_column(str(nid), alias_map)
+        if table_id:
+            edges.append({"source": table_id, "target": nid, "type": "contains"})
+
+    # Connect tables to outputs when an output depends on any column from that table (derives edges)
+    proj_edges = [e for e in col_edges if e.get("type") == "projection"]
+    for e in proj_edges:
+        col_id = str(e.get("source"))
+        out_id = str(e.get("target"))
+        table_id = _infer_table_from_column(col_id, alias_map)
+        if table_id:
+            edges.append({"source": table_id, "target": out_id, "type": "derives"})
 
     # Add join table-level edges for visualization
     for j in joins:
