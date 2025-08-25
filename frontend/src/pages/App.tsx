@@ -12,6 +12,7 @@ import { TopBar } from '../ui/TopBar'
 import { KPICatalog } from '../ui/KPICatalog'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { computeKpiLineage, Lineage } from '../utils/lineage'
 
 export default function App() {
   const params = useParams()
@@ -61,6 +62,9 @@ export default function App() {
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const [preferCross, setPreferCross] = useState<boolean>(true)
   const [chartErrorsByKpi, setChartErrorsByKpi] = useState<Record<string, any>>({})
+  const [lineageOpen, setLineageOpen] = useState(false)
+  const [lineageKpi, setLineageKpi] = useState<any>(null)
+  const [lineageData, setLineageData] = useState<Lineage | null>(null)
   
   // Add KPI Modal state
   const [addKpiModalOpen, setAddKpiModalOpen] = useState(false)
@@ -420,6 +424,19 @@ export default function App() {
     setAiModalPosition({ x: centerX, y: centerY })
   }
 
+  function openLineage(k: any) {
+    try {
+      const lin = computeKpiLineage(k.sql, k)
+      setLineageKpi(k)
+      setLineageData(lin)
+      setLineageOpen(true)
+    } catch (e) {
+      setLineageKpi(k)
+      setLineageData({ sources: [], joins: [] })
+      setLineageOpen(true)
+    }
+  }
+
   function openAddKpiModal() {
     try {
       sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts: [], selectedTables: selected }))
@@ -774,6 +791,7 @@ export default function App() {
                     <button className="btn btn-sm" onClick={() => runKpi(k)}>Test</button>
                     <button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
                     <button className="btn btn-sm" onClick={() => openAiEdit(k)}>AI Edit</button>
+                    <button className="btn btn-sm" onClick={() => openLineage(k)}>KPI Lineage</button>
                     <button className="btn btn-sm" onClick={async () => {
                       const r = await fetch('/api/export/card', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql: k.sql }) }); const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${k.name||'card'}.csv`; a.click(); URL.revokeObjectURL(url)
                     }}>Export</button>
@@ -848,6 +866,107 @@ export default function App() {
             <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', gap: 8, position: 'sticky', bottom: 0, background: 'var(--card)' }}>
               <input className="input" placeholder="Describe the change..." value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyDown={e => { if (e.key==='Enter') sendAiEdit() }} style={{ flex: 1 }} />
               <button className="btn btn-primary" onClick={sendAiEdit}>Send</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {lineageOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999 }} onClick={() => setLineageOpen(false)}>
+          <div 
+            style={{ 
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: 'min(820px, 92vw)', 
+              height: 'min(70vh, 85vh)', 
+              background: 'var(--card)', 
+              border: '1px solid var(--border)', 
+              borderRadius: 12, 
+              display: 'flex', 
+              flexDirection: 'column',
+              boxShadow: 'var(--shadow)'
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'space-between', 
+                padding: 12, 
+                borderBottom: '1px solid var(--border)'
+              }}
+            >
+              <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <div className="card-title">KPI Lineage</div>
+                {lineageKpi?.name && <div className="card-subtitle">{lineageKpi.name}</div>}
+              </div>
+              <div className="toolbar">
+                <button className="btn btn-sm" onClick={() => setLineageOpen(false)}>✕</button>
+              </div>
+            </div>
+            <div style={{ padding: 12, overflow: 'auto', display: 'grid', gap: 12 }}>
+              <div className="panel">
+                <div className="section-title">Overview</div>
+                <div className="card-subtitle">ID: {lineageKpi?.id}</div>
+                <div className="card-subtitle">Schema: {lineageKpi?.expected_schema}</div>
+                <div className="card-subtitle">Chart: {lineageKpi?.chart_type}</div>
+                {lineageKpi?.filter_date_column && <div className="card-subtitle">Filter Date Column: {lineageKpi.filter_date_column}</div>}
+              </div>
+              <div className="panel">
+                <div className="section-title">Sources</div>
+                <div className="scroll">
+                  {(lineageData?.sources || []).length ? (
+                    (lineageData?.sources || []).map(s => (
+                      <div key={s} className="list-item"><span style={{ flex: 1 }}>{s}</span></div>
+                    ))
+                  ) : (
+                    <div className="card-subtitle">No sources detected.</div>
+                  )}
+                </div>
+              </div>
+              <div className="panel">
+                <div className="section-title">Joins</div>
+                <div className="scroll">
+                  {(lineageData?.joins || []).length ? (
+                    (lineageData?.joins || []).map((j, idx) => (
+                      <div key={idx} className="list-item">
+                        <span style={{ flex: 1 }}>{j.left} = {j.right}</span>
+                        <span className="card-subtitle" style={{ fontSize: 11, opacity: 0.8 }}>{j.on}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="card-subtitle">No joins detected.</div>
+                  )}
+                </div>
+              </div>
+              <div className="panel">
+                <div className="section-title">Filters</div>
+                {(lineageData?.filters || []).length ? (
+                  (lineageData?.filters || []).map((f, idx) => (
+                    <div key={idx} className="list-item"><span style={{ flex: 1 }}>{f}</span></div>
+                  ))
+                ) : (
+                  <div className="card-subtitle">No filters detected.</div>
+                )}
+              </div>
+              <div className="panel">
+                <div className="section-title">Group By / Outputs</div>
+                {lineageData?.groupBy && lineageData.groupBy.length > 0 && (
+                  <div className="card-subtitle">Group By: {lineageData.groupBy.join(', ')}</div>
+                )}
+                {lineageData?.outputs && (
+                  <div className="card-subtitle">Outputs: {Object.entries(lineageData.outputs).filter(([,v]) => Boolean(v)).map(([k,v]) => `${k}: ${(v as string).replace(/\s+/g,' ')}`).join(' | ')}</div>
+                )}
+              </div>
+              <div className="panel">
+                <div className="section-title">Raw JSON</div>
+                <div className="toolbar" style={{ marginBottom: 8 }}>
+                  <button className="btn btn-sm" onClick={() => { try { navigator.clipboard.writeText(JSON.stringify(lineageData, null, 2)) } catch {} }}>Copy JSON</button>
+                </div>
+                <pre style={{ maxHeight: 220, overflow: 'auto', fontSize: 11 }}><code>{JSON.stringify(lineageData, null, 2)}</code></pre>
+              </div>
             </div>
           </div>
         </div>
