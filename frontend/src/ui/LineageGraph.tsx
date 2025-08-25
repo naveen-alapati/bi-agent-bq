@@ -41,9 +41,9 @@ export function LineageGraph({ graph }: { graph: { nodes: GraphNode[]; edges: Gr
 
     const sim = d3.forceSimulation(nodes)
       .force('link', d3.forceLink(links).id((d: any) => d.id).distance((l: any) => l.type === 'join_table' ? 120 : 60))
-      .force('charge', d3.forceManyBody().strength(-220))
+      .force('charge', d3.forceManyBody().strength(-280))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius((d: any) => radius(d) + 8))
+      .force('collision', d3.forceCollide().radius((d: any) => radius(d) + 10))
 
     const link = g.append('g').attr('stroke', '#999').attr('stroke-opacity', 0.6)
       .selectAll('line')
@@ -71,7 +71,7 @@ export function LineageGraph({ graph }: { graph: { nodes: GraphNode[]; edges: Gr
       .attr('x', 10)
       .attr('y', 4)
       .attr('font-size', 11)
-      .attr('fill', 'var(--fg)')
+      .attr('fill', 'currentColor')
 
     sim.on('tick', () => {
       link
@@ -86,10 +86,13 @@ export function LineageGraph({ graph }: { graph: { nodes: GraphNode[]; edges: Gr
     // Fit to view on first render
     setTimeout(() => {
       const bounds = g.node()?.getBBox()
-      if (bounds && isFinite(bounds.width) && isFinite(bounds.height)) {
-        const scale = 0.9 / Math.max(bounds.width / width, bounds.height / height)
-        const translate = [width / 2 - scale * (bounds.x + bounds.width / 2), height / 2 - scale * (bounds.y + bounds.height / 2)]
-        svg.transition().duration(350).call(zoom.transform as any, d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale))
+      if (bounds && isFinite(bounds.width) && isFinite(bounds.height) && bounds.width > 0 && bounds.height > 0) {
+        const wScale = Math.max(0.3, Math.min(1.2, 0.9 * width / bounds.width))
+        const hScale = Math.max(0.3, Math.min(1.2, 0.9 * height / bounds.height))
+        const scale = Math.min(wScale, hScale)
+        const tx = width / 2 - scale * (bounds.x + bounds.width / 2)
+        const ty = height / 2 - scale * (bounds.y + bounds.height / 2)
+        svg.transition().duration(350).call(zoom.transform as any, d3.zoomIdentity.translate(tx, ty).scale(scale))
       }
     }, 0)
   }, [graph, size.w, size.h])
