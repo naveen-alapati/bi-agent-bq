@@ -36,6 +36,7 @@ from .models import (
 )
 from .diagnostics import run_self_test
 from .llm import LLMClient
+from .lineage import compute_lineage
 
 llm_client = LLMClient()
 
@@ -614,6 +615,21 @@ def analyst_chat(req: AnalystChatRequest):
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
+
+# Lineage API
+@app.post("/api/lineage")
+def lineage(payload: Dict[str, Any]):
+	try:
+		sql = payload.get('sql') or ''
+		if not sql:
+			raise HTTPException(status_code=400, detail="sql is required")
+		dialect = payload.get('dialect') or 'bigquery'
+		data = compute_lineage(sql, dialect=dialect)
+		return data
+	except HTTPException:
+		raise
+	except Exception as exc:
+		raise HTTPException(status_code=400, detail={"type": exc.__class__.__name__, "message": str(exc)})
 
 # Serve built SPA (Dockerfile copies frontend/dist to /app/static)
 static_dir = os.path.abspath(os.getenv("STATIC_DIR", "/app/static"))
