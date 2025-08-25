@@ -66,10 +66,20 @@ class LLMClient:
         try:
             return json.loads(s)
         except Exception:
-            match = re.search(r"\{[\s\S]*\}", s)
-            if match:
-                return json.loads(match.group(0))
-            raise
+            # Try sanitizing invalid escape sequences like \o, \e, etc.
+            try:
+                sanitized = re.sub(r"\\(?![\"\\/bfnrtu])", r"\\\\", s)
+                return json.loads(sanitized)
+            except Exception:
+                match = re.search(r"\{[\s\S]*\}", s)
+                if match:
+                    frag = match.group(0)
+                    try:
+                        return json.loads(frag)
+                    except Exception:
+                        frag_sanitized = re.sub(r"\\(?![\"\\/bfnrtu])", r"\\\\", frag)
+                        return json.loads(frag_sanitized)
+                raise
 
     def _generate_gemini(self, system_prompt: str, user_prompt: str) -> Dict[str, Any]:
         if not self.gemini_api_key:
@@ -100,8 +110,26 @@ class LLMClient:
                 # Some variants may return 'content' as a direct string or nested dict
                 text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("functionCall", {}).get("args", "") or json.dumps(data)
             return self._parse_json_text(text)
-        except Exception as exc:
-            raise RuntimeError(f"Failed to parse Gemini response: {data}") from exc
+        except Exception:
+            # Fallback: try sanitizing the raw 'text' field if present, else the whole payload
+            try:
+                txt = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                if txt:
+                    txt = re.sub(r"\\(?![\"\\/bfnrtu])", r"\\\\", txt)
+                    return json.loads(txt)
+            except Exception:
+                pass
+            # Last resort: extract JSON object from the raw body text and sanitize
+            try:
+                raw = json.dumps(data)
+                m = re.search(r"\{[\s\S]*\}", raw)
+                if m:
+                    frag = m.group(0)
+                    frag = re.sub(r"\\(?![\"\\/bfnrtu])", r"\\\\", frag)
+                    return json.loads(frag)
+            except Exception:
+                pass
+            raise RuntimeError(f"Failed to parse Gemini response: {data}")
 
     def edit_sql(self, original_sql: str, instruction: str) -> str:
         system = (
@@ -134,11 +162,9 @@ class LLMClient:
             data = resp.json()
             text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
             try:
-                return json.loads(text).get("sql", original_sql)
+                return self._parse_json_text(text).get("sql", original_sql)
             except Exception:
-                # last resort, try to find a JSON object in the text
-                m = re.search(r"\{[\s\S]*\}", text)
-                return (json.loads(m.group(0)).get("sql", original_sql) if m else original_sql)
+                return original_sql
         raise RuntimeError("Unsupported provider for edit_sql")
 
     def diagnostics(self) -> Dict[str, Any]:
