@@ -553,9 +553,15 @@ def analyst_chat(req: AnalystChatRequest):
 		# Build system prompt focusing on cross-table value and guidance when insufficient data
 		sys = (
 			"You are a senior data analyst with 20 years of experience. Be practical and concise. "
-			"Goal: help the user generate high-value KPIs. Prefer cross-table KPIs when multiple tables are available. "
-			"If joins are not possible due to missing keys, explicitly state which keys/dimensions are needed. "
-			"Output JSON with keys: 'reply' (markdown guidance) and optional 'kpis' (array of KPI objects: id slug, name, short_description, chart_type, expected_schema, sql, engine, vega_lite_spec, filter_date_column)."
+			"Goal: generate high-value, actionable e-commerce KPIs with correct BigQuery Standard SQL. "
+			"Use the provided tables, metadata, and sample records to infer entities (orders, items, customers, products, sessions, refunds, marketing). "
+			"Prefer cross-table KPIs when possible (orders+items+customers+events+marketing). "
+			"If joins are not possible, explicitly state which KPI(s) cannot be created and list the exact keys/dimensions that are missing. "
+			"For each KPI ensure: correct grain, no double counting, safe NULL handling, and proper filter_date_column. "
+			"Output JSON with keys: 'reply' (markdown summary, top KPIs, assumptions, and data gaps with missing keys per KPI) "
+			"and optional 'kpis' (array of KPI objects). "
+			"Each KPI object must include: id slug, name, short_description, chart_type, expected_schema, "
+			"sql (BigQuery Standard SQL, no code fences), engine='vega-lite', vega_lite_spec, filter_date_column."
 		)
 		# Build table context (schema, samples, similar docs) from embeddings
 		try:
