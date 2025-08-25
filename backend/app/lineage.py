@@ -2,7 +2,11 @@ from typing import Any, Dict, List, Optional, Tuple, Set
 
 import sqlglot
 from sqlglot import exp
-from sqlglot.optimizer.qualify import qualify_columns
+try:
+    # Prefer module import to handle version differences gracefully
+    from sqlglot.optimizer import qualify as _qualify_mod  # type: ignore
+except Exception:  # pragma: no cover - defensive for older sqlglot
+    _qualify_mod = None  # type: ignore
 
 
 def _fq_table(t: exp.Expression) -> str:
@@ -153,10 +157,17 @@ def compute_lineage(sql: str, dialect: str = "bigquery") -> Dict[str, Any]:
     except Exception as e:
         raise ValueError(f"SQL parse error: {e}")
 
-    try:
-        qualified = qualify_columns(parsed, dialect=dialect)
-    except Exception:
-        qualified = parsed
+    qualified = parsed
+    # Attempt to qualify using whichever API is available in this sqlglot version
+    if _qualify_mod is not None:
+        try:
+            if hasattr(_qualify_mod, "qualify_columns"):
+                qualified = _qualify_mod.qualify_columns(parsed, dialect=dialect)  # type: ignore[attr-defined]
+            elif hasattr(_qualify_mod, "qualify"):
+                # Older API
+                qualified = _qualify_mod.qualify(parsed, dialect=dialect)  # type: ignore[attr-defined]
+        except Exception:
+            qualified = parsed
 
     sources = _collect_tables(qualified)
     joins = _join_details(qualified)
