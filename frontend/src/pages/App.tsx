@@ -791,10 +791,8 @@ export default function App() {
                     <button className="btn btn-sm" onClick={() => runKpi(k)}>Test</button>
                     <button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
                     <button className="btn btn-sm" onClick={() => openAiEdit(k)}>AI Edit</button>
-                    <button className="btn btn-sm" onClick={() => openLineage(k)}>KPI Lineage</button>
-                    <button className="btn btn-sm" onClick={async () => {
-                      const r = await fetch('/api/export/card', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql: k.sql }) }); const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${k.name||'card'}.csv`; a.click(); URL.revokeObjectURL(url)
-                    }}>Export</button>
+                    <button className="btn btn-sm" onClick={() => openLineage(k)}>Lineage</button>
+                    {/* Export hidden per requirement */}
                     <button className="btn btn-sm" onClick={() => { const nextKpis = kpis.filter(x => x.id !== k.id); const nextLayout = (activeLayout||[]).filter(l => l.i !== k.id); setKpis(nextKpis); setLayouts(nextLayout); setTabLayouts(prev => ({ ...prev, [activeTab]: nextLayout })); setDirty(true) }}>Remove</button>
                   </div>
                 </div>
@@ -899,7 +897,7 @@ export default function App() {
               }}
             >
               <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                <div className="card-title">KPI Lineage</div>
+                <div className="card-title">Lineage</div>
                 {lineageKpi?.name && <div className="card-subtitle">{lineageKpi.name}</div>}
               </div>
               <div className="toolbar">
