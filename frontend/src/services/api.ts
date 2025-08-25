@@ -75,5 +75,10 @@ export const api = {
   async analystChat(message: string, kpis: any[], tables: {datasetId: string, tableId: string}[], history?: {role: string; content: string}[], prefer_cross: boolean = true) {
     const r = await axios.post('/api/analyst/chat', { message, kpis, tables, history, prefer_cross })
     return r.data as { reply: string; kpis?: any[] }
+  },
+
+  async getLineage(sql: string, dialect: 'bigquery' = 'bigquery') {
+    const r = await axios.post('/api/lineage', { sql, dialect })
+    return r.data as any
   }
 }

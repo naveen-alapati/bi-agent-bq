@@ -10,6 +10,7 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 import { createRoot } from 'react-dom/client'
+import { LineageGraph } from '../ui/LineageGraph'
 
 export default function Home() {
   const [dashboards, setDashboards] = useState<any[]>([])
@@ -40,6 +41,13 @@ export default function Home() {
   const feedLayerRef = useRef<HTMLDivElement | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
   const exportDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Lineage modal state
+  const [lineageOpen, setLineageOpen] = useState(false)
+  const [lineageKpi, setLineageKpi] = useState<any | null>(null)
+  const [lineageData, setLineageData] = useState<any | null>(null)
+  const [lineageLoading, setLineageLoading] = useState(false)
+  const [lineageError, setLineageError] = useState<string | null>(null)
 
   // Initial dashboard loading - only run once
   useEffect(() => { 
@@ -150,6 +158,22 @@ export default function Home() {
         console.error('Failed to refresh dashboard:', error)
         toast('error', `Failed to refresh ${dash.name}`, 'Refresh Error')
       }
+  }
+
+  async function openLineage(k: any) {
+    try {
+      setLineageOpen(true)
+      setLineageKpi(k)
+      setLineageLoading(true)
+      setLineageError(null)
+      const res = await api.getLineage(k.sql)
+      setLineageData(res)
+    } catch (e: any) {
+      setLineageError(String(e?.response?.data?.detail?.message || e?.message || e))
+      setLineageData({ sources: [], joins: [], graph: { nodes: [], edges: [] } })
+    } finally {
+      setLineageLoading(false)
+    }
   }
 
   async function refreshDashboardList() {
@@ -885,6 +909,7 @@ export default function Home() {
                       </div>
                       <div className="card-actions">
                         <button className="btn btn-sm" onClick={() => runKpiWithFilters(k, true)}>Refresh</button>
+                        <button className="btn btn-sm" onClick={() => openLineage(k)}>Lineage</button>
                       </div>
                     </div>
                     <div style={{ flex: 1, padding: 8 }} className="no-drag"><ChartRenderer chart={k} rows={rowsByKpi[k.id] || []} /></div>
@@ -895,6 +920,103 @@ export default function Home() {
           )}
         </div>
       </div>
+
+      {lineageOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999 }} onClick={() => setLineageOpen(false)}>
+          <div 
+            style={{ 
+              position: 'absolute', left: '5%', top: '5%', width: '90%', height: '90%', 
+              background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)'
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="card-header" style={{ padding: 12 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <div className="card-title">KPI Lineage</div>
+                {lineageKpi?.name && <div className="card-subtitle">{lineageKpi.name}</div>}
+              </div>
+              <div className="toolbar">
+                <button className="btn btn-sm" onClick={() => setLineageOpen(false)}>✕</button>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12, padding: 12, height: 'calc(100% - 56px)' }}>
+              <div className="panel" style={{ height: '100%', padding: 0 }}>
+                {lineageLoading ? (
+                  <div style={{ padding: 16 }}>Loading lineage…</div>
+                ) : lineageError ? (
+                  <div style={{ padding: 16, color: 'var(--danger)' }}>Failed to load lineage: {lineageError}</div>
+                ) : (
+                  <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                    <LineageGraph graph={(lineageData && lineageData.graph) || { nodes: [], edges: [] }} />
+                  </div>
+                )}
+              </div>
+              <div className="panel" style={{ height: '100%', overflow: 'auto' }}>
+                <div className="section-title">Overview</div>
+                <div className="card-subtitle">ID: {lineageKpi?.id}</div>
+                <div className="card-subtitle">Schema: {lineageKpi?.expected_schema}</div>
+                <div className="card-subtitle">Chart: {lineageKpi?.chart_type}</div>
+                {lineageKpi?.filter_date_column && <div className="card-subtitle">Filter Date Column: {lineageKpi.filter_date_column}</div>}
+
+                <div className="section-title" style={{ marginTop: 12 }}>Sources</div>
+                <div className="scroll">
+                  {(lineageData?.sources || []).length ? (
+                    (lineageData?.sources || []).map((s: string) => (
+                      <div key={s} className="list-item"><span style={{ flex: 1 }}>{s}</span></div>
+                    ))
+                  ) : (
+                    <div className="card-subtitle">No sources detected</div>
+                  )}
+                </div>
+
+                <div className="section-title" style={{ marginTop: 12 }}>Joins</div>
+                <div className="scroll">
+                  {(lineageData?.joins || []).length ? (
+                    (lineageData?.joins || []).map((j: any, idx: number) => (
+                      <div key={idx} className="list-item">
+                        <div className="card-subtitle">{j.type || 'JOIN'}: {j.left_table} ↔ {j.right_table}</div>
+                        {j.on && <div style={{ fontSize: 12, color: 'var(--muted)' }}>ON {j.on}</div>}
+                        {(j.pairs || []).length > 0 && (
+                          <div style={{ fontSize: 12 }}>
+                            {(j.pairs || []).map((p: any, i: number) => (
+                              <div key={i}>{p.left} = {p.right}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="card-subtitle">No joins found</div>
+                  )}
+                </div>
+
+                <div className="section-title" style={{ marginTop: 12 }}>Filters</div>
+                {(lineageData?.filters || []).length ? (
+                  (lineageData?.filters || []).map((f: string, idx: number) => (
+                    <div key={idx} className="list-item"><span style={{ flex: 1 }}>{f}</span></div>
+                  ))
+                ) : (
+                  <div className="card-subtitle">No filters</div>
+                )}
+
+                <div className="section-title" style={{ marginTop: 12 }}>Group By / Outputs</div>
+                {lineageData?.groupBy && lineageData.groupBy.length > 0 && (
+                  <div className="card-subtitle">Group By: {lineageData.groupBy.join(', ')}</div>
+                )}
+                {lineageData?.outputs && (
+                  <div className="card-subtitle">Outputs: {Object.entries(lineageData.outputs).filter(([,v]) => Boolean(v)).map(([k,v]) => `${k}: ${(v as string).replace(/\s+/g,' ')}`).join(' | ')}</div>
+                )}
+
+                <div className="section-title" style={{ marginTop: 12 }}>Raw JSON</div>
+                <div className="toolbar" style={{ marginBottom: 8 }}>
+                  <button className="btn btn-sm" onClick={() => { try { navigator.clipboard.writeText(JSON.stringify(lineageData, null, 2)) } catch {} }}>Copy JSON</button>
+                </div>
+                <pre style={{ maxHeight: 220, overflow: 'auto', fontSize: 11 }}><code>{JSON.stringify(lineageData, null, 2)}</code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
