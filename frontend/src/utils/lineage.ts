@@ -36,7 +36,7 @@ export function computeKpiLineage(sql: string, kpi?: any): Lineage {
   let filterDateColumn: string | undefined = kpi?.filter_date_column
 
   try {
-    const backticked = [...text.matchAll(/`([\w-]+\.[\w-]+\.[\w-]+)`/g)].map(m => m[1])
+    const backticked = [...text.matchAll(/`([\w-]+(?:\.[\w-]+){1,2})`/g)].map(m => m[1])
     sources.push(...backticked)
     const fromJoin = [...text.matchAll(/\b(from|join)\s+([`\w.-]+)(?:\s+as)?\s+(\w+)/ig)]
     for (const m of fromJoin) {
@@ -50,8 +50,8 @@ export function computeKpiLineage(sql: string, kpi?: any): Lineage {
   } catch {}
 
   try {
-    // Capture JOIN ... ON ... blocks across newlines until next keyword
-    const joinOnRegex = /\bjoin\s+([`\w.-]+)(?:\s+as)?\s+(\w+)?[\s\S]*?\bon\s+([\s\S]*?)(?=\bjoin\b|\bwhere\b|\bgroup\s+by\b|\border\s+by\b|\blimit\b|$)/ig
+    // Capture [LEFT|RIGHT|FULL [OUTER]|INNER|CROSS] JOIN ... ON ... blocks across newlines until next keyword
+    const joinOnRegex = /\b(?:left|right|full|inner|cross)?\s*(?:outer\s+)?join\s+([`\w.-]+)(?:\s+as)?\s+(\w+)?[\s\S]*?\bon\s+([\s\S]*?)(?=\b(?:left|right|full|inner|cross)?\s*(?:outer\s+)?join\b|\bwhere\b|\bgroup\s+by\b|\border\s+by\b|\blimit\b|$)/ig
     let m: RegExpExecArray | null
     while ((m = joinOnRegex.exec(text)) !== null) {
       const rightTableRaw = (m[1] || '').replace(/[`]/g, '')
@@ -121,8 +121,8 @@ export function computeKpiLineage(sql: string, kpi?: any): Lineage {
       outputs.label = a('label')
       outputs.value = a('value')
       if (!filterDateColumn) {
-        const dateAlias = s.match(/\bdate\s*\(.*?\)\s+as\s+([\w_]+)/i)
-        if (dateAlias) filterDateColumn = dateAlias[1]
+        const dt = s.match(/\bdate_trunc\s*\(.*?\)\s+as\s+([\w_]+)/i) || s.match(/\bdate\s*\(.*?\)\s+as\s+([\w_]+)/i)
+        if (dt) filterDateColumn = dt[1]
       }
     }
   } catch {}
