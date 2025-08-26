@@ -109,13 +109,11 @@ export function LineageGraph({ graph, joins }: { graph: { nodes: GraphNode[]; ed
     for (const l of rawLinks) { usedIds.add(l.source); usedIds.add(l.target) }
     const nodes = Object.values(baseNodes).filter(n => usedIds.has(n.id))
 
-    // Map node id -> index
-    const idToIndex = new Map<string, number>(nodes.map((n, i) => [n.id, i]))
-
-    // Convert links to index-based for sankey
+    // Convert links to ID-based for sankey with nodeId accessor
+    const validId = new Set(nodes.map(n => n.id))
     const links = rawLinks
-      .filter(l => idToIndex.has(l.source) && idToIndex.has(l.target))
-      .map(l => ({ source: idToIndex.get(l.source) as number, target: idToIndex.get(l.target) as number, value: 1, _type: l.type, _meta: l.meta }))
+      .filter(l => validId.has(l.source) && validId.has(l.target))
+      .map(l => ({ source: l.source, target: l.target, value: 1, _type: l.type, _meta: l.meta }))
 
     // Prepare sankey layout
     const sankeyLayout = d3Sankey<any, any>()
@@ -150,7 +148,7 @@ export function LineageGraph({ graph, joins }: { graph: { nodes: GraphNode[]; ed
       .attr('stroke-width', (d: any) => Math.max(1, d.width))
       .attr('stroke-linecap', 'round')
 
-    link.append('title').text((d: any) => `${nodes[d.source.index].label || nodes[d.source.index].id} → ${nodes[d.target.index].label || nodes[d.target.index].id}`)
+    link.append('title').text((d: any) => `${d.source?.label || d.source?.id} → ${d.target?.label || d.target?.id}`)
 
     // Draw nodes
     const node = g.append('g')
