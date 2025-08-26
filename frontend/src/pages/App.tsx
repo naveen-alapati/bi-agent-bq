@@ -700,13 +700,15 @@ export default function App() {
                 </>
               )}
               <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
-                <button className="btn btn-primary" onClick={onAnalyze} disabled={!selected.length || loading}>
-                  {loading ? 'Analyzing...' : `Analyze (${selected.length})`}
-                </button>
-                <button className="btn btn-secondary" onClick={openAddKpiModal} disabled={!selected.length}>
+                <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+                  <button className="btn btn-primary" onClick={onAnalyze} disabled={!selected.length || loading}>
+                    {loading ? 'Analysing...' : 'Analyse and Propose KPIs'}
+                  </button>
+                </div>
+                <button className="btn btn-secondary" onClick={openAddKpiModal} disabled={!selected.length} style={{ display: 'none' }}>
                   Add KPI
                 </button>
-                <label className="card-subtitle" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <label className="card-subtitle" style={{ display: 'none' }}>
                   <input type="checkbox" checked={preferCross} onChange={e => setPreferCross(e.target.checked)} /> Prefer cross-table KPIs
                 </label>
               </div>
