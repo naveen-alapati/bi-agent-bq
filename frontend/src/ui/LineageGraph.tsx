@@ -2,10 +2,10 @@ import React, { useEffect, useRef, useState } from 'react'
 import * as d3 from 'd3'
 import { sankey as d3Sankey, sankeyLinkHorizontal, sankeyJustify } from 'd3-sankey'
 
-type GraphNode = { id: string; type: 'table' | 'column' | 'output' | 'join'; label?: string }
+type GraphNode = { id: string; type: 'table' | 'column' | 'output' | 'join' | 'cte' | 'aggregation' | 'dataset' | 'metric'; label?: string }
 type GraphEdge = { source: string; target: string; type: 'join' | 'join_table' | 'projection' | 'contains' | 'derives' }
 
-type JoinInfo = { left_table?: string; right_table?: string; type?: string; on?: string; pairs?: { left: string; right: string }[] }
+type JoinInfo = { id?: string; left_table?: string; right_table?: string; type?: string; on?: string; pairs?: { left: string; right: string }[] }
 
 export function LineageGraph({ graph, joins }: { graph: { nodes: GraphNode[]; edges: GraphEdge[] }; joins?: JoinInfo[] }) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
@@ -35,7 +35,18 @@ export function LineageGraph({ graph, joins }: { graph: { nodes: GraphNode[]; ed
     })
     svg.call(zoom as any)
 
-    const color = (d: GraphNode) => d.type === 'table' ? '#239BA7' : d.type === 'output' ? '#8B5CF6' : d.type === 'join' ? '#F59E0B' : '#64748B'
+    // Consistent color mapping by node type
+    const NODE_COLORS: Record<string, string> = {
+      dataset: '#3B82F6',      // blue-500
+      table: '#239BA7',        // teal custom
+      column: '#64748B',       // slate-500
+      cte: '#06B6D4',          // cyan-500
+      aggregation: '#EC4899',  // pink-500
+      join: '#F59E0B',         // amber-500
+      output: '#8B5CF6',       // violet-500 (metric)
+      metric: '#8B5CF6'
+    }
+    const color = (d: GraphNode) => NODE_COLORS[d.type] || '#64748B'
 
     // 1 inch spacing ~ 96 px
     const NODE_PADDING = 96
@@ -52,7 +63,7 @@ export function LineageGraph({ graph, joins }: { graph: { nodes: GraphNode[]; ed
     }
 
     // Compute output dependencies by table to help route join -> outputs
-    const outputs = new Set<string>((graph.nodes || []).filter(n => n.type === 'output').map(n => n.id))
+    const outputs = new Set<string>((graph.nodes || []).filter(n => (n.type === 'output' || n.type === 'metric')).map(n => n.id))
     const derivesEdges = (graph.edges || []).filter(e => e.type === 'derives')
     const outputsByTable: Record<string, Set<string>> = {}
     for (const e of derivesEdges) {
@@ -62,26 +73,24 @@ export function LineageGraph({ graph, joins }: { graph: { nodes: GraphNode[]; ed
     }
 
     // Create join nodes and corresponding links
-    const joinNodeIds: string[] = []
     const syntheticJoinLinks: { source: string; target: string; type: 'join_in' | 'join_out'; meta?: any }[] = []
     const effectiveJoins = Array.isArray(joins) ? joins : []
     for (let idx = 0; idx < effectiveJoins.length; idx++) {
       const j = effectiveJoins[idx]
       const joinId = `__join__${idx + 1}`
-      const joinLabel = `JOIN ${idx + 1}`
+      const joinLabel = (j && j.id) ? String(j.id) : `JOIN ${idx + 1}`
       baseNodes[joinId] = { id: joinId, type: 'join', label: joinLabel }
-      joinNodeIds.push(joinId)
 
       const lt = j.left_table || ''
       const rt = j.right_table || ''
-      if (lt) syntheticJoinLinks.push({ source: lt, target: joinId, type: 'join_in', meta: { on: j.on, side: 'left' } })
-      if (rt) syntheticJoinLinks.push({ source: rt, target: joinId, type: 'join_in', meta: { on: j.on, side: 'right' } })
+      if (lt) syntheticJoinLinks.push({ source: lt, target: joinId, type: 'join_in', meta: { on: j.on, side: 'left', id: j.id } })
+      if (rt) syntheticJoinLinks.push({ source: rt, target: joinId, type: 'join_in', meta: { on: j.on, side: 'right', id: j.id } })
 
       // Route join -> outputs where either side contributes
       const contributingOutputs = new Set<string>()
       if (lt && outputsByTable[lt]) outputsByTable[lt].forEach(o => contributingOutputs.add(o))
       if (rt && outputsByTable[rt]) outputsByTable[rt].forEach(o => contributingOutputs.add(o))
-      contributingOutputs.forEach(o => syntheticJoinLinks.push({ source: joinId, target: o, type: 'join_out', meta: { on: j.on } }))
+      contributingOutputs.forEach(o => syntheticJoinLinks.push({ source: joinId, target: o, type: 'join_out', meta: { on: j.on, id: j.id } }))
     }
 
     // Build remaining links from graph
