@@ -947,7 +947,7 @@ export default function Home() {
                   <div style={{ padding: 16, color: 'var(--danger)' }}>Failed to load lineage: {lineageError}</div>
                 ) : (
                   <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-                    <LineageGraph graph={(lineageData && lineageData.graph) || { nodes: [], edges: [] }} joins={(lineageData && lineageData.joins) || []} outputs={(lineageData && lineageData.outputs) || undefined} />
+                    <LineageGraph graph={((lineageData && lineageData.nodes && lineageData.edges) ? { nodes: lineageData.nodes, edges: lineageData.edges } : (lineageData && lineageData.graph) || { nodes: [], edges: [] })} joins={(lineageData && lineageData.joins) || []} outputs={(lineageData && lineageData.outputs) || undefined} />
                   </div>
                 )}
               </div>
@@ -957,6 +957,9 @@ export default function Home() {
                 <div className="card-subtitle">Schema: {lineageKpi?.expected_schema}</div>
                 <div className="card-subtitle">Chart: {lineageKpi?.chart_type}</div>
                 {lineageKpi?.filter_date_column && <div className="card-subtitle">Filter Date Column: {lineageKpi.filter_date_column}</div>}
+                {lineageData?.nodes && (
+                  <div className="card-subtitle">KPI Owner: {(lineageData.nodes.find((n: any) => n.type === 'kpi')?.owner) || 'Naveen Alapati'}</div>
+                )}
 
                 <div className="section-title" style={{ marginTop: 12 }}>Sources</div>
                 <div className="scroll">
@@ -1005,6 +1008,15 @@ export default function Home() {
                 )}
                 {lineageData?.outputs && (
                   <div className="card-subtitle">Outputs: {Object.entries(lineageData.outputs).filter(([,v]) => Boolean(v)).map(([k,v]) => `${k}: ${(v as string).replace(/\s+/g,' ')}`).join(' | ')}</div>
+                )}
+
+                {lineageData?.governance && (
+                  <>
+                    <div className="section-title" style={{ marginTop: 12 }}>Governance</div>
+                    <div className="card-subtitle">Created By: {lineageData.governance.createdBy}</div>
+                    <div className="card-subtitle">Last Modified: {lineageData.governance.lastModified}</div>
+                    <div className="card-subtitle">Version: {lineageData.governance.lineageVersion}</div>
+                  </>
                 )}
 
                 <div className="section-title" style={{ marginTop: 12 }}>Raw JSON</div>

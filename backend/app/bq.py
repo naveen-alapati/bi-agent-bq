@@ -301,6 +301,50 @@ class BigQueryService:
             for r in results
         ]
 
+    # ===== INFORMATION_SCHEMA helpers =====
+    def get_table_row_count_info_schema(self, project_id: str, dataset_id: str, table_id: str) -> Optional[int]:
+        try:
+            loc = self._get_dataset_location(dataset_id) or self.location
+            sql = (
+                f"SELECT row_count FROM `{project_id}.{dataset_id}.INFORMATION_SCHEMA.TABLES` "
+                f"WHERE table_name = @tb LIMIT 1"
+            )
+            job = self.client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("tb", "STRING", table_id)]),
+                location=loc,
+            )
+            rows = list(job)
+            if rows:
+                rc = rows[0]["row_count"]
+                return int(rc) if rc is not None else None
+        except Exception:
+            return None
+        return None
+
+    def get_columns_info_schema(self, project_id: str, dataset_id: str, table_id: str) -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = {}
+        try:
+            loc = self._get_dataset_location(dataset_id) or self.location
+            sql = (
+                f"SELECT column_name, data_type FROM `{project_id}.{dataset_id}.INFORMATION_SCHEMA.COLUMNS` "
+                f"WHERE table_name = @tb"
+            )
+            job = self.client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("tb", "STRING", table_id)]),
+                location=loc,
+            )
+            for row in job:
+                name = str(row["column_name"]) if row.get("column_name") is not None else None
+                dtype = str(row["data_type"]) if row.get("data_type") is not None else None
+                if not name:
+                    continue
+                out[name] = {"dataType": dtype}
+        except Exception:
+            pass
+        return out
+
     def _migrate_null_default_flags(self, table_fqn: str) -> None:
         """Migrate existing dashboards with NULL default_flag values to FALSE."""
         try:

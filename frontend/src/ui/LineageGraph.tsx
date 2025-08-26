@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import * as d3 from 'd3'
 import { sankey as d3Sankey, sankeyLinkHorizontal, sankeyJustify } from 'd3-sankey'
 
-type GraphNode = { id: string; type: 'table' | 'column' | 'output' | 'join' | 'cte' | 'aggregation' | 'dataset' | 'metric'; label?: string }
-type GraphEdge = { source: string; target: string; type: 'join' | 'join_table' | 'projection' | 'contains' | 'derives' }
+type GraphNode = { id: string; type: 'database' | 'schema' | 'table' | 'column' | 'output' | 'join' | 'cte' | 'aggregation' | 'dataset' | 'metric' | 'kpi'; label?: string }
+type GraphEdge = { source: string; target: string; type: 'join' | 'join_table' | 'projection' | 'contains' | 'derives' | 'dimension' | 'measure' | 'join_input' | 'join_output' }
 
 type JoinInfo = { id?: string; left_table?: string; right_table?: string; type?: string; on?: string; pairs?: { left: string; right: string }[] }
 
@@ -40,13 +40,16 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
     // Consistent color mapping by node type
     const NODE_COLORS: Record<string, string> = {
       dataset: '#3B82F6',      // blue-500
+      database: '#1D4ED8',     // blue-700
+      schema: '#60A5FA',       // blue-400
       table: '#239BA7',        // teal custom
       column: '#64748B',       // slate-500
       cte: '#06B6D4',          // cyan-500
       aggregation: '#EC4899',  // pink-500
       join: '#F59E0B',         // amber-500
       output: '#8B5CF6',       // violet-500 (metric)
-      metric: '#8B5CF6'
+      metric: '#8B5CF6',
+      kpi: '#8B5CF6',          // same as metric/output
     }
     const color = (d: GraphNode) => NODE_COLORS[d.type] || '#64748B'
 
@@ -116,28 +119,31 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
       outputsByTable[e.source].add(e.target)
     }
 
-    // Create join nodes and corresponding links
+    // Create join nodes and corresponding links (skip if enterprise join edges exist)
     const syntheticJoinLinks: { source: string; target: string; type: 'join_in' | 'join_out'; meta?: any }[] = []
-    const effectiveJoins = Array.isArray(joins) ? joins : []
-    for (let idx = 0; idx < effectiveJoins.length; idx++) {
-      const j = effectiveJoins[idx]
-      const joinId = `__join__${idx + 1}`
-      const joinLabel = (j && j.id) ? String(j.id) : `JOIN ${idx + 1}`
-      baseNodes[joinId] = { id: joinId, type: 'join', label: joinLabel }
+    const hasEnterpriseJoinEdges = Array.isArray(graph?.edges) && graph.edges.some((e: any) => e?.type === 'join_input' || e?.type === 'join_output')
+    if (!hasEnterpriseJoinEdges) {
+      const effectiveJoins = Array.isArray(joins) ? joins : []
+      for (let idx = 0; idx < effectiveJoins.length; idx++) {
+        const j = effectiveJoins[idx]
+        const joinId = `__join__${idx + 1}`
+        const joinLabel = (j && j.id) ? String(j.id) : `JOIN ${idx + 1}`
+        baseNodes[joinId] = { id: joinId, type: 'join', label: joinLabel }
 
-      const lt = j.left_table || ''
-      const rt = j.right_table || ''
-      if (lt) syntheticJoinLinks.push({ source: lt, target: joinId, type: 'join_in', meta: { on: j.on, side: 'left', id: j.id, pairs: j.pairs || [] } })
-      if (rt) syntheticJoinLinks.push({ source: rt, target: joinId, type: 'join_in', meta: { on: j.on, side: 'right', id: j.id, pairs: j.pairs || [] } })
+        const lt = j.left_table || ''
+        const rt = j.right_table || ''
+        if (lt) syntheticJoinLinks.push({ source: lt, target: joinId, type: 'join_in', meta: { on: j.on, side: 'left', id: j.id, pairs: j.pairs || [] } })
+        if (rt) syntheticJoinLinks.push({ source: rt, target: joinId, type: 'join_in', meta: { on: j.on, side: 'right', id: j.id, pairs: j.pairs || [] } })
 
-      const contributingOutputs = new Set<string>()
-      if (lt && outputsByTable[lt]) outputsByTable[lt].forEach(o => contributingOutputs.add(o))
-      if (rt && outputsByTable[rt]) outputsByTable[rt].forEach(o => contributingOutputs.add(o))
-      contributingOutputs.forEach(o => syntheticJoinLinks.push({ source: joinId, target: o, type: 'join_out', meta: { on: j.on, id: j.id } }))
+        const contributingOutputs = new Set<string>()
+        if (lt && outputsByTable[lt]) outputsByTable[lt].forEach(o => contributingOutputs.add(o))
+        if (rt && outputsByTable[rt]) outputsByTable[rt].forEach(o => contributingOutputs.add(o))
+        contributingOutputs.forEach(o => syntheticJoinLinks.push({ source: joinId, target: o, type: 'join_out', meta: { on: j.on, id: j.id } }))
+      }
     }
 
     // Build remaining links from graph
-    const allowedEdgeTypes = new Set(['contains', 'projection', 'derives'])
+    const allowedEdgeTypes = new Set(['contains', 'projection', 'derives', 'dimension', 'measure', 'join_input', 'join_output'])
     const rawLinks: { source: string; target: string; type: string; meta?: any }[] = []
     for (const e of graph.edges || []) {
       if (!allowedEdgeTypes.has(e.type)) continue
@@ -180,8 +186,10 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
         const t = d._type
         if (t === 'projection') return '#94a3b8'
         if (t === 'contains') return '#38bdf8'
-        if (t === 'join_in' || t === 'join_out') return '#f59e0b'
+        if (t === 'join_in' || t === 'join_out' || t === 'join_input' || t === 'join_output') return '#f59e0b'
         if (t === 'derives') return '#22c55e'
+        if (t === 'dimension') return '#3b82f6'
+        if (t === 'measure') return '#fb923c'
         return '#999'
       })
       .attr('stroke-width', 1.2)
@@ -207,8 +215,11 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
         if (d._meta?.id) return String(d._meta.id)
         return 'Join'
       }
-      if (t === 'join_out') {
+      if (t === 'join_out' || t === 'join_output') {
         return d._meta?.id ? String(d._meta.id) : 'Join'
+      }
+      if (t === 'join_input') {
+        return 'Join'
       }
       if (t === 'contains') {
         return shortCol(d.target?.id || '') || (d.target?.label || d.target?.id || 'Contains')
@@ -218,6 +229,12 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
       }
       if (t === 'derives') {
         return d.target?.label || d.target?.id || 'Derives'
+      }
+      if (t === 'dimension') {
+        return d.source?.label || d.source?.id || 'Dimension'
+      }
+      if (t === 'measure') {
+        return d.source?.label || d.source?.id || 'Measure'
       }
       return `${d.source?.label || d.source?.id || ''} → ${d.target?.label || d.target?.id || ''}`
     }

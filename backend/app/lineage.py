@@ -7,6 +7,8 @@ try:
     from sqlglot.optimizer import qualify as _qualify_mod  # type: ignore
 except Exception:  # pragma: no cover - defensive for older sqlglot
     _qualify_mod = None  # type: ignore
+from datetime import datetime, timezone
+import re
 
 
 def _fq_table(t: exp.Expression) -> str:
@@ -262,7 +264,7 @@ def _collect_column_lineage(expr: exp.Expression) -> Tuple[List[Dict[str, Any]],
     return list(column_nodes.values()), column_edges
 
 
-def compute_lineage(sql: str, dialect: str = "bigquery") -> Dict[str, Any]:
+def compute_lineage(sql: str, dialect: str = "bigquery", bq: Any = None) -> Dict[str, Any]:
     # Parse and qualify for reliable column resolution
     try:
         parsed = sqlglot.parse_one(sql, read=dialect)
@@ -382,6 +384,212 @@ def compute_lineage(sql: str, dialect: str = "bigquery") -> Dict[str, Any]:
         # Extract column refs via re-parsing small fragments is heavy; keep textual record for now
         pass
 
+    # ================= Enterprise enrichments =================
+    # Build metadata for physical hierarchy using BigQuery when available
+    def _split_fqn(table_id: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        parts = [p for p in str(table_id).split('.') if p]
+        if len(parts) >= 3:
+            return parts[0], parts[1], parts[2]
+        if len(parts) == 2:
+            # Use default project if provided by bq
+            proj = getattr(bq, 'project_id', None)
+            return proj, parts[0], parts[1]
+        if len(parts) == 1:
+            return getattr(bq, 'project_id', None), None, parts[0]
+        return None, None, None
+
+    # Index nodes by id for augmentation and deduplication
+    node_by_id: Dict[str, Dict[str, Any]] = {n['id']: n for n in nodes}
+
+    # Physical nodes: databases (projects) and schemas (datasets)
+    databases: Set[str] = set()
+    schemas: Set[str] = set()
+    table_meta_cache: Dict[str, Dict[str, Any]] = {}
+
+    for t in sources:
+        proj, ds, tb = _split_fqn(t)
+        if proj:
+            databases.add(proj)
+        if proj and ds:
+            schemas.add(f"{proj}.{ds}")
+        # Enrich table node with metadata if possible
+        meta: Dict[str, Any] = {"database": proj, "schema": ds, "rowCount": None, "owner": None}
+        if bq and proj and ds and tb:
+            try:
+                # Prefer INFORMATION_SCHEMA for row count and column types
+                rc = None
+                try:
+                    rc = bq.get_table_row_count_info_schema(proj, ds, tb)
+                except Exception:
+                    rc = None
+                meta["rowCount"] = rc
+                # Columns schema
+                cols: Dict[str, Dict[str, Any]] = {}
+                try:
+                    cols = bq.get_columns_info_schema(proj, ds, tb) or {}
+                except Exception:
+                    cols = {}
+                # Fallback to Table object for descriptions if available
+                try:
+                    table_obj = bq.client.get_table(f"{proj}.{ds}.{tb}")
+                    for f in list(getattr(table_obj, 'schema', []) or []):
+                        entry = cols.setdefault(f.name, {"dataType": getattr(f, 'field_type', None)})
+                        if getattr(f, 'description', None) is not None:
+                            entry["description"] = getattr(f, 'description')
+                except Exception:
+                    pass
+                meta["columns"] = cols
+            except Exception:
+                pass
+        table_meta_cache[t] = meta
+        # apply to table node
+        if t in node_by_id:
+            node_by_id[t].update({k: v for k, v in meta.items() if k != 'columns'})
+
+    # Create database and schema nodes and containment edges
+    for db in sorted(databases):
+        if db not in node_by_id:
+            node_by_id[db] = {"id": db, "type": "database", "label": db}
+    for sch in sorted(schemas):
+        if sch not in node_by_id:
+            node_by_id[sch] = {"id": sch, "type": "schema", "label": sch.split('.')[-1]}
+        # contains edge database -> schema
+        db = sch.split('.')[0]
+        edges.append({"source": db, "target": sch, "type": "contains"})
+    for t in sources:
+        proj, ds, _tb = _split_fqn(t)
+        if proj and ds:
+            edges.append({"source": f"{proj}.{ds}", "target": t, "type": "contains"})
+
+    # Enrich column nodes with metadata (dataType, pii, description)
+    for n in list(node_by_id.values()):
+        if n.get('type') == 'column':
+            nid = str(n['id'])
+            base_tables = _resolve_base_tables_for_column(nid)
+            col_name = _clean_identifier(nid).split('.')[-1]
+            found = False
+            for bt in base_tables:
+                meta = table_meta_cache.get(bt) or {}
+                cols = (meta.get('columns') or {})
+                if col_name in cols:
+                    n['dataType'] = cols[col_name].get('dataType')
+                    n['description'] = cols[col_name].get('description')
+                    found = True
+                    break
+            # PII/PHI placeholder
+            n['pii'] = False
+
+    # Logical: join nodes and edges (left/right input to join node)
+    join_node_ids: List[str] = []
+    for idx, j in enumerate(joins):
+        jid = j.get('id') or f"join_{idx + 1}"
+        jtype = (j.get('type') or '').upper() or 'JOIN'
+        node_by_id[jid] = {
+            "id": jid,
+            "type": "join",
+            "label": j.get('on') or jtype,
+            "joinType": jtype,
+            "condition": j.get('on') or '',
+        }
+        join_node_ids.append(jid)
+        # connect pairs to join node as inputs
+        for p in (j.get('pairs') or []):
+            l = p.get('left'); r = p.get('right')
+            if l:
+                edges.append({"source": l, "target": jid, "type": "join_input"})
+            if r:
+                edges.append({"source": r, "target": jid, "type": "join_input"})
+
+    # Aggregation nodes: derive from outputs that look like aggregate functions
+    agg_nodes: List[str] = []
+    def _is_agg(expr_sql: str) -> Optional[Tuple[str, str]]:
+        m = re.match(r"\s*(\w+)\s*\((.*)\)\s*$", expr_sql, re.IGNORECASE)
+        if not m:
+            return None
+        fn = m.group(1).upper()
+        arg = m.group(2)
+        if fn in {"AVG", "SUM", "COUNT", "MIN", "MAX"}:
+            return fn, arg
+        return None
+
+    for key in ["value", "y"]:
+        expr_sql = outputs.get(key) if isinstance(outputs, dict) else None
+        if not expr_sql:
+            continue
+        parsed = _is_agg(expr_sql)
+        if not parsed:
+            continue
+        fn, arg = parsed
+        aid = f"aggregation_{len(agg_nodes) + 1}"
+        node_by_id[aid] = {"id": aid, "type": "aggregation", "label": f"{fn}({arg})"}
+        agg_nodes.append(aid)
+        # measure edge from column(s) inside arg to aggregation
+        # pick first column reference inside arg
+        try:
+            arg_expr = sqlglot.parse_one(f"SELECT {arg}")
+            first_col = next((c.sql() for c in arg_expr.find_all(exp.Column)), None)
+        except Exception:
+            first_col = None
+        if first_col:
+            edges.append({"source": first_col, "target": aid, "type": "measure"})
+        # Join output to aggregation (if join exists)
+        for jid in join_node_ids:
+            edges.append({"source": jid, "target": aid, "type": "join_output"})
+
+    # Semantic: KPI node capturing definition and ownership
+    kpi_id = "kpi_1"
+    kpi_node = {
+        "id": kpi_id,
+        "type": "kpi",
+        "label": "KPI",
+        "definition": (outputs.get("value") or outputs.get("y") or "").strip() if isinstance(outputs, dict) else "",
+        "owner": "Naveen Alapati",
+        "lastModified": datetime.now(timezone.utc).isoformat(),
+        "downstream": [],
+    }
+    node_by_id[kpi_id] = kpi_node
+
+    # Ensure group-by expressions exist as nodes
+    for gexpr in group_by:
+        if gexpr not in node_by_id:
+            node_by_id[gexpr] = {"id": gexpr, "type": "column", "label": gexpr}
+    # Dimension edges from group-by expressions to KPI
+    for gexpr in group_by:
+        edges.append({"source": gexpr, "target": kpi_id, "type": "dimension"})
+
+    # Derivation edges from aggregations to KPI
+    for aid in agg_nodes:
+        edges.append({"source": aid, "target": kpi_id, "type": "derives"})
+
+    # Rebuild nodes list from map
+    nodes = list(node_by_id.values())
+
+    # Governance metadata
+    governance = {
+        "createdBy": "cursor_ai",
+        "lastModified": datetime.now(timezone.utc).isoformat(),
+        "lineageVersion": "1.0",
+    }
+
+    # Hierarchy summary
+    hierarchy: Dict[str, Any] = {
+        "physical": {
+            "databases": sorted(list(databases)),
+            "schemas": sorted(list(schemas)),
+            "tables": sorted(list(sources)),
+            "columns": sorted([n['id'] for n in nodes if n.get('type') == 'column']),
+        },
+        "logical": {
+            "joins": join_node_ids,
+            "filters": filters,
+            "aggregations": agg_nodes,
+        },
+        "semantic": {
+            "kpis": [kpi_id],
+            "dashboards": [],
+        },
+    }
+
     result: Dict[str, Any] = {
         "sources": sources,
         "joins": joins,
@@ -392,6 +600,10 @@ def compute_lineage(sql: str, dialect: str = "bigquery") -> Dict[str, Any]:
             "nodes": nodes,
             "edges": edges,
         },
+        "nodes": nodes,  # enterprise style top-level
+        "edges": edges,  # enterprise style top-level
+        "governance": governance,
+        "hierarchy": hierarchy,
     }
     return result
 

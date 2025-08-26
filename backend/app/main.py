@@ -624,7 +624,7 @@ def lineage(payload: Dict[str, Any]):
 		if not sql:
 			raise HTTPException(status_code=400, detail="sql is required")
 		dialect = payload.get('dialect') or 'bigquery'
-		data = compute_lineage(sql, dialect=dialect)
+		data = compute_lineage(sql, dialect=dialect, bq=bq_service)
 		return data
 	except HTTPException:
 		raise
