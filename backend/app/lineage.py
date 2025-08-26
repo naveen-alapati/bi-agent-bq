@@ -27,6 +27,69 @@ def _collect_tables(expr: exp.Expression) -> List[str]:
     return sorted([t for t in tables if t])
 
 
+def _collect_cte_map(expr: exp.Expression) -> Dict[str, exp.Expression]:
+    """Return mapping of CTE name -> CTE expression body."""
+    cte_map: Dict[str, exp.Expression] = {}
+    for cte in expr.find_all(exp.CTE):
+        try:
+            alias_expr = cte.args.get("alias")
+            name = alias_expr and getattr(alias_expr, "this", None) and alias_expr.this.name
+            body = cte.this if isinstance(cte.this, exp.Expression) else None
+            if name and body is not None:
+                cte_map[str(name)] = body
+        except Exception:
+            continue
+    return cte_map
+
+
+def _collect_tables_excluding(expr: exp.Expression, exclude: Set[str]) -> Tuple[Set[str], Set[str]]:
+    """
+    Collect table identifiers referenced in expr, splitting into (base_tables, referenced_ctes)
+    based on provided exclude set of CTE names.
+    """
+    base_tables: Set[str] = set()
+    referenced_ctes: Set[str] = set()
+    for t in expr.find_all(exp.Table):
+        name = _fq_table(t)
+        if not name:
+            continue
+        short = name.split(".")[-1]
+        if name in exclude or short in exclude:
+            referenced_ctes.add(short if short in exclude else name)
+        else:
+            base_tables.add(name)
+    return base_tables, referenced_ctes
+
+
+def _expand_cte_base_dependencies(cte_map: Dict[str, exp.Expression]) -> Dict[str, Set[str]]:
+    """
+    For each CTE, compute the set of underlying base tables (excluding other CTEs),
+    expanding through CTE-to-CTE references.
+    """
+    cte_names: Set[str] = set(cte_map.keys())
+    base_deps: Dict[str, Set[str]] = {name: set() for name in cte_names}
+    cte_refs: Dict[str, Set[str]] = {name: set() for name in cte_names}
+    # Initial pass: collect direct base tables and CTE references per CTE
+    for name, body in cte_map.items():
+        bases, refs = _collect_tables_excluding(body, cte_names)
+        base_deps[name].update(bases)
+        # Normalize references to raw CTE names (last segment)
+        for r in refs:
+            cte_refs[name].add(r.split(".")[-1])
+    # Expand references transitively until fixed point
+    changed = True
+    while changed:
+        changed = False
+        for name in cte_names:
+            for ref in list(cte_refs.get(name, set())):
+                if ref in base_deps:
+                    before = len(base_deps[name])
+                    base_deps[name].update(base_deps[ref])
+                    if len(base_deps[name]) != before:
+                        changed = True
+    return base_deps
+
+
 def _build_alias_map(expr: exp.Expression, sources: List[str]) -> Dict[str, str]:
     """Map table aliases and short names to fully-qualified table ids.
     Includes CTE/table short names so alias resolution works for columns like cte.col or alias.col.
@@ -218,16 +281,38 @@ def compute_lineage(sql: str, dialect: str = "bigquery") -> Dict[str, Any]:
         except Exception:
             qualified = parsed
 
-    sources = _collect_tables(qualified)
+    # CTE analysis: map each CTE to its underlying base tables
+    cte_map = _collect_cte_map(qualified)
+    cte_names: Set[str] = set(cte_map.keys())
+    cte_base_deps = _expand_cte_base_dependencies(cte_map) if cte_map else {}
+
+    # Sources: only base tables, excluding CTE names
+    base_sources, _ = _collect_tables_excluding(qualified, cte_names)
+    sources = sorted(base_sources)
+
+    # Alias map (start with base tables only)
     alias_map = _build_alias_map(qualified, sources)
+    # If a CTE ultimately maps to a single base table, allow aliasing the CTE name to that base
+    for cte_name, bases in cte_base_deps.items():
+        if len(bases) == 1:
+            try:
+                alias_map.setdefault(cte_name, next(iter(bases)))
+            except Exception:
+                pass
+
     joins = _join_details(qualified)
-    # Assign stable join IDs if missing so frontend can label JOIN nodes consistently
-    try:
-        for i, j in enumerate(joins):
-            if not isinstance(j.get("id", None), str) or not j.get("id"):
-                j["id"] = f"J{i+1}"
-    except Exception:
-        pass
+    # Rewrite join tables to base tables when CTE is uniquely resolved
+    if joins:
+        for j in joins:
+            lt = str(j.get("left_table") or "")
+            rt = str(j.get("right_table") or "")
+            lt_short = lt.split(".")[-1]
+            rt_short = rt.split(".")[-1]
+            if lt_short in cte_base_deps and len(cte_base_deps[lt_short]) == 1:
+                j["left_table"] = next(iter(cte_base_deps[lt_short]))
+            if rt_short in cte_base_deps and len(cte_base_deps[rt_short]) == 1:
+                j["right_table"] = next(iter(cte_base_deps[rt_short]))
+
     filters = _collect_filters(qualified)
     group_by = _collect_group_by(qualified)
     outputs = _collect_outputs(qualified)
@@ -236,7 +321,7 @@ def compute_lineage(sql: str, dialect: str = "bigquery") -> Dict[str, Any]:
     nodes: List[Dict[str, Any]] = []
     edges: List[Dict[str, Any]] = []
 
-    # Table nodes
+    # Table nodes (base sources only)
     for t in sources:
         nodes.append({"id": t, "type": "table", "label": t.split(".")[-1]})
 
@@ -251,21 +336,38 @@ def compute_lineage(sql: str, dialect: str = "bigquery") -> Dict[str, Any]:
     nodes.extend(col_nodes)
     edges.extend(col_edges)
 
-    # Connect columns to their owning tables (contains edges)
+    # Helper: for a column id, resolve contributing base tables considering CTEs
+    def _resolve_base_tables_for_column(col_id: str) -> List[str]:
+        table_id = _infer_table_from_column(col_id, alias_map)
+        if table_id:
+            # If this resolves directly to a CTE with multiple bases, expand
+            short = table_id.split(".")[-1]
+            if short in cte_base_deps and len(cte_base_deps[short]) >= 1:
+                return sorted(list(cte_base_deps[short]))
+            return [table_id]
+        # Otherwise, try to resolve via the qualifier part (alias or cte name)
+        raw = _clean_identifier(col_id)
+        parts = raw.split(".")
+        if len(parts) >= 2:
+            qual = parts[0]
+            if qual in cte_base_deps and len(cte_base_deps[qual]) >= 1:
+                return sorted(list(cte_base_deps[qual]))
+        return []
+
+    # Connect columns to their owning base tables (contains edges)
     for n in col_nodes:
         nid = n.get("id") or ""
-        table_id = _infer_table_from_column(str(nid), alias_map)
-        if table_id:
-            edges.append({"source": table_id, "target": nid, "type": "contains"})
+        for base in _resolve_base_tables_for_column(str(nid)):
+            edges.append({"source": base, "target": nid, "type": "contains"})
 
-    # Connect tables to outputs when an output depends on any column from that table (derives edges)
+    # Connect base tables to outputs when an output depends on any column from that table (derives edges)
     proj_edges = [e for e in col_edges if e.get("type") == "projection"]
     for e in proj_edges:
         col_id = str(e.get("source"))
         out_id = str(e.get("target"))
-        table_id = _infer_table_from_column(col_id, alias_map)
-        if table_id:
-            edges.append({"source": table_id, "target": out_id, "type": "derives"})
+        bases = _resolve_base_tables_for_column(col_id)
+        for base in bases:
+            edges.append({"source": base, "target": out_id, "type": "derives"})
 
     # Add join table-level edges for visualization
     for j in joins:
