@@ -312,6 +312,10 @@ def compute_lineage(sql: str, dialect: str = "bigquery") -> Dict[str, Any]:
                 j["left_table"] = next(iter(cte_base_deps[lt_short]))
             if rt_short in cte_base_deps and len(cte_base_deps[rt_short]) == 1:
                 j["right_table"] = next(iter(cte_base_deps[rt_short]))
+        # Ensure join IDs
+        for i, j in enumerate(joins):
+            if not isinstance(j.get("id", None), str) or not j.get("id"):
+                j["id"] = f"J{i+1}"
 
     filters = _collect_filters(qualified)
     group_by = _collect_group_by(qualified)
@@ -323,33 +327,48 @@ def compute_lineage(sql: str, dialect: str = "bigquery") -> Dict[str, Any]:
 
     # Table nodes (base sources only)
     for t in sources:
-        nodes.append({"id": t, "type": "table", "label": t.split(".")[-1]})
+        # Synthesize database and schema by parts
+        parts = t.split(".")
+        db = parts[0] if len(parts) >= 3 else None
+        schema = parts[1] if len(parts) >= 3 else (parts[0] if len(parts) == 2 else None)
+        nodes.append({
+            "id": t,
+            "type": "table",
+            "label": t.split(".")[-1],
+            "database": db,
+            "schema": schema,
+            # Synthetic metadata placeholders
+            "rowCount": None,
+            "owner": None,
+        })
 
     # Column nodes and edges
     col_nodes, col_edges = _collect_column_lineage(qualified)
-    # Attach table info to column nodes when possible by heuristic split of qualified name
+    # Attach metadata placeholders
     for n in col_nodes:
         nid = n.get("id") or ""
-        if "." in nid:
-            # could be alias.col or db.table.col; leave as-is
-            pass
-    nodes.extend(col_nodes)
+        nodes.append({
+            "id": nid,
+            "type": n.get("type") or "column",
+            "label": nid.split(".")[-1].replace('"', '').replace('`', ''),
+            "dataType": None,
+            "pii": False,
+            "description": None,
+        })
     edges.extend(col_edges)
 
     # Helper: for a column id, resolve contributing base tables considering CTEs
     def _resolve_base_tables_for_column(col_id: str) -> List[str]:
         table_id = _infer_table_from_column(col_id, alias_map)
         if table_id:
-            # If this resolves directly to a CTE with multiple bases, expand
             short = table_id.split(".")[-1]
             if short in cte_base_deps and len(cte_base_deps[short]) >= 1:
                 return sorted(list(cte_base_deps[short]))
             return [table_id]
-        # Otherwise, try to resolve via the qualifier part (alias or cte name)
         raw = _clean_identifier(col_id)
-        parts = raw.split(".")
-        if len(parts) >= 2:
-            qual = parts[0]
+        parts2 = raw.split(".")
+        if len(parts2) >= 2:
+            qual = parts2[0]
             if qual in cte_base_deps and len(cte_base_deps[qual]) >= 1:
                 return sorted(list(cte_base_deps[qual]))
         return []
@@ -374,13 +393,76 @@ def compute_lineage(sql: str, dialect: str = "bigquery") -> Dict[str, Any]:
         lt = j.get("left_table")
         rt = j.get("right_table")
         if lt and rt:
-            edges.append({"source": lt, "target": rt, "type": "join_table", "on": j.get("on", "")})
+            # introduce join node for enterprise graph
+            join_node_id = f"join_{str(j.get('id') or '').lstrip('J') or '1'}"
+            nodes.append({
+                "id": join_node_id,
+                "type": "join",
+                "label": (j.get("on") or "").replace("\n", " ")[:160] or f"{lt} ⋈ {rt}",
+                "joinType": j.get("type") or "",
+                "condition": j.get("on") or "",
+            })
+            # join inputs
+            for p in (j.get("pairs") or []):
+                if p.get("left"):
+                    edges.append({"source": p["left"], "target": join_node_id, "type": "join_input"})
+                if p.get("right"):
+                    edges.append({"source": p["right"], "target": join_node_id, "type": "join_input"})
+            # join output to derived outputs (if any)
+            edges.append({"source": join_node_id, "target": rt, "type": "join_output"})
 
-    # Add filter/groupBy dependency placeholder edges (from referenced columns)
-    # Filters
-    for f in filters:
-        # Extract column refs via re-parsing small fragments is heavy; keep textual record for now
-        pass
+    # Aggregations (heuristic): detect common aggregates in projections
+    aggregation_nodes: List[Dict[str, Any]] = []
+    for e in proj_edges:
+        src = str(e.get("source") or "")
+        tgt = str(e.get("target") or "")
+        expr = outputs and next((outputs[k] for k in outputs.keys() if outputs and outputs.get(k) == tgt), None)
+        # If target alias appears in outputs/value and source contains a function
+        if any(fn in src.lower() for fn in ["avg(", "sum(", "count(", "min(", "max("]):
+            ag_id = f"aggregation_{len(aggregation_nodes)+1}"
+            aggregation_nodes.append({"id": ag_id, "type": "aggregation", "label": src})
+            nodes.append(aggregation_nodes[-1])
+            edges.append({"source": src, "target": ag_id, "type": "measure"})
+            edges.append({"source": ag_id, "target": tgt, "type": "derives"})
+
+    # KPI/Output nodes (semantic layer)
+    kpi_nodes: List[Dict[str, Any]] = []
+    if outputs:
+        # Create a single KPI node summarizing outputs
+        kpi_id = "kpi_1"
+        definition_parts: List[str] = []
+        if outputs.get("value"):
+            definition_parts.append(str(outputs["value"]))
+        if group_by:
+            definition_parts.append("grouped by " + ", ".join(group_by))
+        kpi_nodes.append({
+            "id": kpi_id,
+            "type": "kpi",
+            "label": "KPI",
+            "definition": " | ".join(definition_parts) if definition_parts else None,
+            "owner": None,
+            "lastModified": None,
+            "downstream": [],
+        })
+        nodes.append(kpi_nodes[-1])
+        # Wire dimensions/measures to KPI
+        for g in group_by or []:
+            edges.append({"source": g, "target": kpi_id, "type": "dimension"})
+        if outputs.get("value"):
+            edges.append({"source": outputs["value"], "target": kpi_id, "type": "derives"})
+
+    # Build hierarchical sections (Physical / Logical / Semantic)
+    physical_nodes = [n["id"] for n in nodes if n.get("type") in ("table", "column")]
+    logical_nodes = [n["id"] for n in nodes if n.get("type") in ("join", "aggregation")]
+    semantic_nodes = [n["id"] for n in nodes if n.get("type") in ("kpi", "output")]
+
+    # Governance metadata
+    from datetime import datetime, timezone
+    governance = {
+        "createdBy": "cursor_ai",
+        "lastModified": datetime.now(timezone.utc).isoformat(),
+        "lineageVersion": "1.0"
+    }
 
     result: Dict[str, Any] = {
         "sources": sources,
@@ -391,6 +473,14 @@ def compute_lineage(sql: str, dialect: str = "bigquery") -> Dict[str, Any]:
         "graph": {
             "nodes": nodes,
             "edges": edges,
+        },
+        "enterprise": {
+            "hierarchy": {
+                "physical": physical_nodes,
+                "logical": logical_nodes,
+                "semantic": semantic_nodes,
+            },
+            "governance": governance,
         },
     }
     return result
