@@ -221,6 +221,13 @@ def compute_lineage(sql: str, dialect: str = "bigquery") -> Dict[str, Any]:
     sources = _collect_tables(qualified)
     alias_map = _build_alias_map(qualified, sources)
     joins = _join_details(qualified)
+    # Assign stable join IDs if missing so frontend can label JOIN nodes consistently
+    try:
+        for i, j in enumerate(joins):
+            if not isinstance(j.get("id", None), str) or not j.get("id"):
+                j["id"] = f"J{i+1}"
+    except Exception:
+        pass
     filters = _collect_filters(qualified)
     group_by = _collect_group_by(qualified)
     outputs = _collect_outputs(qualified)

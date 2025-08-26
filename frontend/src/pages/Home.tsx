@@ -947,7 +947,7 @@ export default function Home() {
                   <div style={{ padding: 16, color: 'var(--danger)' }}>Failed to load lineage: {lineageError}</div>
                 ) : (
                   <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-                    <LineageGraph graph={(lineageData && lineageData.graph) || { nodes: [], edges: [] }} />
+                    <LineageGraph graph={(lineageData && lineageData.graph) || { nodes: [], edges: [] }} joins={(lineageData && lineageData.joins) || []} />
                   </div>
                 )}
               </div>
