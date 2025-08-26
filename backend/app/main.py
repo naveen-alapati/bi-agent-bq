@@ -11,6 +11,8 @@ import io
 import zipfile
 from google.cloud import bigquery
 import json
+from fastapi import Request
+import re
 
 from .bq import BigQueryService
 from .embeddings import EmbeddingMode, EmbeddingService
@@ -37,6 +39,7 @@ from .models import (
 from .diagnostics import run_self_test
 from .llm import LLMClient
 from .lineage import compute_lineage
+from .retrieval import RetrievalPlugin
 
 llm_client = LLMClient()
 
@@ -46,6 +49,7 @@ BQ_LOCATION = os.getenv("BQ_LOCATION", "US")
 EMBEDDING_MODE = os.getenv("EMBEDDING_MODE", "bigquery")
 CREATE_INDEX_THRESHOLD = int(os.getenv("CREATE_INDEX_THRESHOLD", "5000"))
 DASH_DATASET = os.getenv("DASHBOARDS_DATASET", "analytics_dash")
+RETRIEVAL_TABLE = os.getenv("RETRIEVAL_TABLE", "ai_edit_library")
 
 app = FastAPI(title="Analytics KPI POC")
 
@@ -72,6 +76,31 @@ kpi_service = KPIService(
 	embedding_dataset=BQ_DATASET_EMBED,
 	create_index_threshold=CREATE_INDEX_THRESHOLD,
 )
+retrieval_plugin = RetrievalPlugin(
+	bq=bq_service,
+	embeddings=embedding_service,
+	project_id=PROJECT_ID,
+	dataset=BQ_DATASET_EMBED,
+	table=RETRIEVAL_TABLE,
+	top_k=5,
+)
+
+
+def _extract_table_refs(sql: str) -> List[str]:
+	try:
+		if not sql:
+			return []
+		refs: List[str] = []
+		# Backticked fully-qualified refs
+		for m in re.findall(r"`([\w-]+\.[\w$-]+\.[\w$-]+)`", sql):
+			refs.append(m)
+		# Unquoted (approximate); avoid duplicates
+		for m in re.findall(r"\b([\w-]+\.[\w$-]+\.[\w$-]+)\b", sql):
+			if m not in refs:
+				refs.append(m)
+		return refs
+	except Exception:
+		return []
 
 
 @app.get("/api/health")
@@ -231,17 +260,40 @@ def run_kpi(req: RunKpiRequest):
 
 
 @app.post("/api/sql/edit")
-def edit_sql(payload: Dict[str, str]):
+def edit_sql(payload: Dict[str, str], request: Request):
 	try:
 		original_sql = payload.get('sql', '')
 		instruction = payload.get('instruction', '')
-		new_sql = kpi_service.llm.edit_sql(original_sql, instruction)
+		aug_instruction = instruction
+		try:
+			if retrieval_plugin.is_enabled(request.headers.get('X-Retrieval-Assist')):
+				tables = _extract_table_refs(original_sql)
+				ret = retrieval_plugin.retrieve(
+					task_type="SQL_EDIT",
+					intent_text=instruction or original_sql[:200],
+					dialect="bigquery",
+					tables=tables,
+					top_k=3,
+				)
+				ex = ret.get("examples") or []
+				if ex:
+					# Append compact exemplars to the instruction to steer the model
+					lines: List[str] = ["Use prior accepted exemplars when rewriting. Examples:"]
+					for e in ex[:3]:
+						intent = (e.get("intent") or "").strip()
+						sql_after = (e.get("sql_after") or "").strip()
+						if sql_after:
+							lines.append(f"- Intent: {intent[:160]} | SQL: {sql_after[:400]}")
+					aug_instruction = instruction + "\n\n" + "\n".join(lines)
+		except Exception:
+			pass
+		new_sql = kpi_service.llm.edit_sql(original_sql, aug_instruction)
 		return {"sql": new_sql}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
 @app.post("/api/kpi/edit")
-def edit_kpi(payload: Dict[str, str]):
+def edit_kpi(payload: Dict[str, str], request: Request):
 	try:
 		original_kpi = payload.get('kpi') or {}
 		original_sql = original_kpi.get('sql') or payload.get('sql', '')
@@ -252,7 +304,21 @@ def edit_kpi(payload: Dict[str, str]):
 			"'kpi' should include updated fields (name, short_description, chart_type, expected_schema, engine, vega_lite_spec, sql, filter_date_column). "
 			"'markdown' is a readable explanation of the change (no JSON)."
 		)
-		user = json.dumps({"kpi": original_kpi, "sql": original_sql, "instruction": instruction})
+		# Optionally retrieve prior exemplars
+		retrieval = None
+		try:
+			if retrieval_plugin.is_enabled(request.headers.get('X-Retrieval-Assist')):
+				tables = _extract_table_refs(original_sql)
+				retrieval = retrieval_plugin.retrieve(
+					task_type="KPI_UPDATE",
+					intent_text=instruction or (original_kpi.get('name') or ''),
+					dialect="bigquery",
+					tables=tables,
+					top_k=3,
+				)
+		except Exception:
+			retrieval = None
+		user = json.dumps({"kpi": original_kpi, "sql": original_sql, "instruction": instruction, "retrieval_examples": (retrieval or {}).get("examples", [])})
 		resp = llm_client.generate_json(system, user)
 		updated_kpi = original_kpi.copy()
 		if isinstance(resp, dict):
@@ -277,7 +343,7 @@ def edit_kpi(payload: Dict[str, str]):
 		raise HTTPException(status_code=500, detail=str(exc))
 
 @app.post("/api/kpi/edit_chat")
-def edit_kpi_chat(payload: Dict[str, Any]):
+def edit_kpi_chat(payload: Dict[str, Any], request: Request):
 	"""
 	Interactive KPI refinement. Body: { kpi, message, history?: [{role, content}], context?: { rows?: any[] } }
 	Returns: { reply: markdown, kpi?: updated }
@@ -292,7 +358,22 @@ def edit_kpi_chat(payload: Dict[str, Any]):
 			"Use the conversation history and the current KPI to suggest improvements. "
 			"When appropriate, propose changes and return JSON with keys 'markdown' (the readable response) and optional 'kpi' (the updated KPI)."
 		)
-		user = json.dumps({"kpi": kpi, "message": message, "history": history[-10:], "context": ctx})
+		# Retrieval exemplars (optional)
+		retrieval = None
+		try:
+			if retrieval_plugin.is_enabled(request.headers.get('X-Retrieval-Assist')):
+				orig_sql = kpi.get('sql') or ''
+				tables = _extract_table_refs(orig_sql)
+				retrieval = retrieval_plugin.retrieve(
+					task_type="KPI_UPDATE",
+					intent_text=message or (kpi.get('name') or ''),
+					dialect="bigquery",
+					tables=tables,
+					top_k=3,
+				)
+		except Exception:
+			retrieval = None
+		user = json.dumps({"kpi": kpi, "message": message, "history": history[-10:], "context": ctx, "retrieval_examples": (retrieval or {}).get("examples", [])})
 		resp = llm_client.generate_json(sys, user)
 		markdown = ""
 		updated = None

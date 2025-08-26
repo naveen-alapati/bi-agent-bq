@@ -1,5 +1,22 @@
 import axios from 'axios'
 
+const RETRIEVAL_HEADER = 'X-Retrieval-Assist'
+
+export function setRetrievalAssistEnabled(enabled: boolean) {
+  if (enabled) {
+    (axios.defaults.headers.common as any)[RETRIEVAL_HEADER] = 'true'
+  } else {
+    try { delete (axios.defaults.headers.common as any)[RETRIEVAL_HEADER] } catch {}
+  }
+  try { localStorage.setItem('retrievalAssist', JSON.stringify(enabled)) } catch {}
+}
+
+// Initialize from persisted preference
+try {
+  const v = JSON.parse(localStorage.getItem('retrievalAssist') || 'false')
+  if (v) (axios.defaults.headers.common as any)[RETRIEVAL_HEADER] = 'true'
+} catch {}
+
 export const api = {
   async getDatasets() {
     const r = await axios.get('/api/datasets')
