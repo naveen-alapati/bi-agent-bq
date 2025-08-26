@@ -74,9 +74,7 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
       const arg = m[2] || ''
       const fnMap: Record<string, string> = { avg: 'Average', sum: 'Total', count: 'Count', max: 'Max', min: 'Min' }
       const base = fnMap[fn] || fn.toUpperCase()
-      // Try to extract a nice column name from arg: handle nested like DISTINCT col, or table.col
       const argCol = lastIdentifier(arg.replace(/\bdistinct\s+/i, '').trim())
-      // Simple synonyms
       const synonyms: Record<string, string> = { 'sale_price': 'Order Value', 'sales': 'Revenue' }
       const prettyArg = synonyms[argCol] || toTitleCase(argCol)
       if (fn === 'count' && /\*/.test(arg)) return 'Count'
@@ -84,7 +82,6 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
     }
     function stripAlias(sqlExpr?: string): string | undefined {
       if (!sqlExpr) return undefined
-      // Remove trailing AS alias forms
       return sqlExpr.replace(/\s+AS\s+\w+\s*$/i, '').trim()
     }
     const friendlyOutputs: Record<string, string> = {}
@@ -133,7 +130,6 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
       if (lt) syntheticJoinLinks.push({ source: lt, target: joinId, type: 'join_in', meta: { on: j.on, side: 'left', id: j.id, pairs: j.pairs || [] } })
       if (rt) syntheticJoinLinks.push({ source: rt, target: joinId, type: 'join_in', meta: { on: j.on, side: 'right', id: j.id, pairs: j.pairs || [] } })
 
-      // Route join -> outputs where either side contributes
       const contributingOutputs = new Set<string>()
       if (lt && outputsByTable[lt]) outputsByTable[lt].forEach(o => contributingOutputs.add(o))
       if (rt && outputsByTable[rt]) outputsByTable[rt].forEach(o => contributingOutputs.add(o))
@@ -148,21 +144,17 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
       rawLinks.push({ source: e.source, target: e.target, type: e.type })
     }
 
-    // Merge synthetic join links
     rawLinks.push(...syntheticJoinLinks)
 
-    // Filter out isolated nodes (keep only nodes that appear in any link)
     const usedIds = new Set<string>()
     for (const l of rawLinks) { usedIds.add(l.source); usedIds.add(l.target) }
     const nodes = Object.values(baseNodes).filter(n => usedIds.has(n.id))
 
-    // Convert links to ID-based for sankey with nodeId accessor
     const validId = new Set(nodes.map(n => n.id))
     const links = rawLinks
       .filter(l => validId.has(l.source) && validId.has(l.target))
       .map(l => ({ source: l.source, target: l.target, value: 1, _type: l.type, _meta: l.meta }))
 
-    // Prepare sankey layout
     const sankeyLayout = d3Sankey<any, any>()
       .nodeId((d: any) => d.id)
       .nodeWidth(NODE_WIDTH)
@@ -175,10 +167,10 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
       links: links.map(l => ({ ...l }))
     }) as unknown as { nodes: (GraphNode & { x0: number; x1: number; y0: number; y1: number })[]; links: any[] }
 
-    // Draw links
+    // Draw links thin
     const link = g.append('g')
       .attr('fill', 'none')
-      .attr('stroke-opacity', 0.4)
+      .attr('stroke-opacity', 0.45)
       .selectAll('path')
       .data(sankeyData.links)
       .enter()
@@ -192,12 +184,11 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
         if (t === 'derives') return '#22c55e'
         return '#999'
       })
-      .attr('stroke-width', (d: any) => Math.max(1, d.width))
+      .attr('stroke-width', 1.2)
       .attr('stroke-linecap', 'round')
 
     link.append('title').text((d: any) => `${d.source?.label || d.source?.id} → ${d.target?.label || d.target?.id}`)
 
-    // Link labels
     const shortCol = (s: string) => {
       if (!s) return ''
       const parts = String(s).replace(/["`]/g, '').split('.')
@@ -209,20 +200,26 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
         const pairs = Array.isArray(d._meta?.pairs) ? d._meta.pairs : []
         const side = d._meta?.side === 'right' ? 'right' : 'left'
         const cols = pairs.map((p: any) => side === 'left' ? shortCol(p.left) : shortCol(p.right)).filter(Boolean)
-        if (!cols.length) return ''
-        const text = cols.slice(0, 3).join(', ')
-        return cols.length > 3 ? `${text}…` : text
+        if (cols.length) {
+          const text = cols.slice(0, 3).join(', ')
+          return cols.length > 3 ? `${text}…` : text
+        }
+        if (d._meta?.id) return String(d._meta.id)
+        return 'Join'
       }
       if (t === 'join_out') {
-        return d._meta?.id ? String(d._meta.id) : 'JOIN'
+        return d._meta?.id ? String(d._meta.id) : 'Join'
       }
       if (t === 'contains') {
-        return shortCol(d.target?.id || '')
+        return shortCol(d.target?.id || '') || (d.target?.label || d.target?.id || 'Contains')
       }
       if (t === 'projection') {
-        return shortCol(d.source?.id || '')
+        return shortCol(d.source?.id || '') || (d.source?.label || d.source?.id || 'Projection')
       }
-      return ''
+      if (t === 'derives') {
+        return d.target?.label || d.target?.id || 'Derives'
+      }
+      return `${d.source?.label || d.source?.id || ''} → ${d.target?.label || d.target?.id || ''}`
     }
 
     g.append('g')
@@ -238,9 +235,11 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
       .attr('font-size', 10)
       .attr('fill', 'currentColor')
       .style('pointer-events', 'none')
+      .style('paint-order', 'stroke')
+      .style('stroke', 'white')
+      .style('stroke-width', '3px')
       .text((d: any) => linkLabel(d))
 
-    // Draw nodes
     const node = g.append('g')
       .selectAll('g')
       .data(sankeyData.nodes)
@@ -258,7 +257,6 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
 
     node.append('title').text((d: any) => d.id)
 
-    // Labels: to the right of the node
     node.append('text')
       .attr('x', (d: any) => d.x1 + 8)
       .attr('y', (d: any) => (d.y0 + d.y1) / 2)
@@ -268,7 +266,6 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
       .text((d: any) => d.label || (d.type === 'table' ? d.id.split('.').slice(-1)[0] : d.id))
       .style('pointer-events', 'none')
 
-    // Fit to view on first render
     setTimeout(() => {
       const bounds = (g.node() as SVGGElement | null)?.getBBox()
       if (bounds && isFinite(bounds.width) && isFinite(bounds.height) && bounds.width > 0 && bounds.height > 0) {
