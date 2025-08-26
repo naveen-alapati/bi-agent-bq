@@ -579,10 +579,8 @@ export default function App() {
       const shapeWarn = validateShape(updated.expected_schema, rows)
       if (shapeWarn) {
         setAiTestStatus({ status: 'error', error: shapeWarn, attempt, runtimeMs })
-        // Feed back to AI up to 3 attempts
-        if (attempt < 3) {
-          await handleAutoFix(updated, shapeWarn, attempt)
-        }
+        setAiChat(prev => [...prev, { role: 'assistant', text: `Test failed (shape mismatch). ${shapeWarn}. Tell me how you'd like to adjust the KPI or columns.` }])
+        // Do not auto-fix; wait for user input
         return
       }
       setAiTestStatus({ status: 'success', rows: rows.slice(0, 10), runtimeMs, attempt })
@@ -590,14 +588,15 @@ export default function App() {
       setRowsByKpi(prev => ({ ...prev, [updated.id]: rows }))
       // Telemetry
       void sendTelemetry(updated.id, true, runtimeMs, rows?.length || 0, attempt, '')
+      // Inform user in chat
+      setAiChat(prev => [...prev, { role: 'assistant', text: `Test passed in ${runtimeMs} ms. I updated the chart preview. Let me know if you want further edits.` }])
     } catch (e: any) {
       const errDetail = String(e?.response?.data?.detail?.message || e?.response?.data?.detail || e?.message || e)
       setAiTestStatus({ status: 'error', error: errDetail, attempt })
       // Telemetry
       void sendTelemetry(updated.id, false, 0, 0, attempt, errDetail)
-      if (attempt < 3) {
-        await handleAutoFix(updated, errDetail, attempt)
-      }
+      // Explain in chat and wait for user instruction
+      setAiChat(prev => [...prev, { role: 'assistant', text: `Test failed. Here's the error summary:\n\n${errDetail}\n\nTell me what constraint or direction to apply (e.g., change aggregation, add join key, rename columns), and I'll fix it.` }])
     }
   }
 
