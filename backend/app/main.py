@@ -13,6 +13,8 @@ from google.cloud import bigquery
 import json
 from fastapi import Request
 import re
+import uuid
+from time import perf_counter
 
 from .bq import BigQueryService
 from .embeddings import EmbeddingMode, EmbeddingService
@@ -184,6 +186,10 @@ def run_kpi(req: RunKpiRequest):
 		sql = req.sql
 		params: List[bigquery.ScalarQueryParameter] = []
 		where_clauses: List[str] = []
+		# Optional preview LIMIT wrapper (default 0 meaning disabled)
+		preview_limit = int(getattr(req, 'preview_limit', 0) or 0)
+		# Shape validation flag (default false)
+		validate_shape = bool(getattr(req, 'validate_shape', False))
 		# apply date filter if provided
 		if req.date_column and req.filters and isinstance(req.filters.get('date'), dict):
 			date_filter = req.filters['date']
@@ -201,26 +207,34 @@ def run_kpi(req: RunKpiRequest):
 			if col and val is not None:
 				where_clauses.append(f"{col} = @catValue")
 				params.append(bigquery.ScalarQueryParameter("catValue", "STRING", str(val)))
-		# Helper to run query (with optional WHERE wrapper)
+		# Helper to run query (with optional WHERE/LIMIT wrapper)
 		def _run_query(q: str):
+			final_sql = q
 			if where_clauses:
-				wrapped = f"SELECT * FROM ( {q} ) WHERE " + " AND ".join(where_clauses)
-				job_config = bigquery.QueryJobConfig(query_parameters=params)
-				rows_iter = bq_service.client.query(wrapped, job_config=job_config, location=bq_service.location)
-				result_rows = [dict(r) for r in rows_iter]
-				return [ { k: bq_service._normalize_value(v) for k, v in r.items() } for r in result_rows ]
-			rows = bq_service.query_rows(q)
-			return rows
+				final_sql = f"SELECT * FROM ( {final_sql} ) WHERE " + " AND ".join(where_clauses)
+			if preview_limit and preview_limit > 0:
+				final_sql = f"SELECT * FROM ( {final_sql} ) LIMIT {int(preview_limit)}"
+			job_config = bigquery.QueryJobConfig(query_parameters=params)
+			rows_iter = bq_service.client.query(final_sql, job_config=job_config, location=bq_service.location)
+			result_rows = [dict(r) for r in rows_iter]
+			return [ { k: bq_service._normalize_value(v) for k, v in r.items() } for r in result_rows ]
 		# First attempt
+		start = perf_counter()
 		try:
 			rows = _run_query(sql)
+			elapsed_ms = int((perf_counter()-start)*1000)
+			# Optional schema/shape validation
+			if validate_shape and req.expected_schema:
+				viol = _validate_expected_shape(req.expected_schema, rows)
+				if viol:
+					# Surface as 400 to simplify client handling
+					raise HTTPException(status_code=400, detail={"type": "ShapeMismatch", "message": viol, "sql": sql})
 			return {"rows": rows}
 		except Exception as inner_exc:
 			msg = str(inner_exc).lower()
 			# Add deterministic SAFE_DIVIDE rewrite as a fallback in addition to LLM edit
 			def _rewrite_safe_divide(q: str) -> str:
 				import re as _re
-				# Naive replacement of a/b with SAFE_DIVIDE(a,b) when not already wrapped
 				pattern = r"(?<!SAFE_DIVIDE\()(?P<a>[A-Za-z0-9_\.\)\]]+)\s*/\s*(?P<b>[A-Za-z0-9_\.\(\[]+)"
 				def _repl(m):
 					return f"SAFE_DIVIDE({m.group('a')}, {m.group('b')})"
@@ -228,19 +242,18 @@ def run_kpi(req: RunKpiRequest):
 			should_try_fix = ("divide by zero" in msg) or ("division by zero" in msg) or ("invalid" in msg and "/" in sql)
 			if should_try_fix:
 				try:
-					# Ask LLM to rewrite with SAFE_DIVIDE while preserving schema/aliases
 					fixed_sql = kpi_service.llm.edit_sql(sql, "Rewrite to use SAFE_DIVIDE for all divisions; preserve output columns and aliases.")
 					rows = _run_query(fixed_sql)
 					return {"rows": rows}
 				except Exception:
-					# Deterministic fallback: naive SAFE_DIVIDE rewrite
 					try:
 						rows = _run_query(_rewrite_safe_divide(sql))
 						return {"rows": rows}
 					except Exception:
 						pass
-			# If not a divide-by-zero or all retries failed, rethrow the original
 			raise inner_exc
+	except HTTPException:
+		raise
 	except Exception as exc:
 		# Return structured error payload to help frontend and AI Edit
 		err_detail: Dict[str, Any] = {
@@ -250,13 +263,55 @@ def run_kpi(req: RunKpiRequest):
 			"sql": sql,
 		}
 		try:
-			# BigQuery exceptions may include .errors list
 			errors = getattr(exc, "errors", None)
 			if errors:
 				err_detail["errors"] = errors
 		except Exception:
 			pass
 		raise HTTPException(status_code=400, detail=err_detail)
+
+
+def _validate_expected_shape(expected_schema: Optional[str], rows: List[Dict[str, Any]]) -> Optional[str]:
+	try:
+		esc = (expected_schema or '').strip().lower()
+		if not esc:
+			return None
+		if esc.startswith('time'):
+			if rows and (('x' not in rows[0]) or ('y' not in rows[0])):
+				return "Expected timeseries columns x,y not found"
+		elif esc.startswith('cat') or esc == 'categorical':
+			if rows and (('label' not in rows[0]) or ('value' not in rows[0])):
+				return "Expected categorical columns label,value not found"
+		elif esc.startswith('dist'):
+			if rows and (('label' not in rows[0]) or ('value' not in rows[0])):
+				return "Expected distribution columns label,value not found"
+		return None
+	except Exception:
+		return None
+
+
+@app.post("/api/ai_edit/telemetry")
+def ai_edit_telemetry(payload: Dict[str, Any]):
+	try:
+		table = bq_service.ensure_ai_edit_telemetry_table(BQ_DATASET_EMBED, table="ai_edit_telemetry")
+		row = {
+			"id": uuid.uuid4().hex,
+			"kpi_id": payload.get('kpi_id') or '',
+			"action": payload.get('action') or 'test',
+			"success": bool(payload.get('success')),
+			"runtime_ms": int(payload.get('runtime_ms') or 0),
+			"row_count": int(payload.get('row_count') or 0),
+			"attempt": int(payload.get('attempt') or 0),
+			"error_type": payload.get('error_type') or '',
+			"error_message": (payload.get('error_message') or '')[:1500],
+			"dashboard_id": payload.get('dashboard_id') or '',
+			"retrieval_enabled": bool(payload.get('retrieval_enabled')),
+			"created_at": datetime.utcnow().isoformat(),
+		}
+		bq_service.insert_ai_edit_telemetry(table, [row])
+		return {"status": "ok"}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/api/sql/edit")

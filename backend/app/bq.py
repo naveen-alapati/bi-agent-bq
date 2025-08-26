@@ -301,6 +301,36 @@ class BigQueryService:
             for r in results
         ]
 
+    # ===== AI Edit Telemetry =====
+    def ensure_ai_edit_telemetry_table(self, dataset_id: str, table: str = "ai_edit_telemetry") -> str:
+        self.ensure_dataset(dataset_id)
+        table_fqn = f"{self.project_id}.{dataset_id}.{table}"
+        schema = [
+            bigquery.SchemaField("id", "STRING"),
+            bigquery.SchemaField("kpi_id", "STRING"),
+            bigquery.SchemaField("action", "STRING"),
+            bigquery.SchemaField("success", "BOOL"),
+            bigquery.SchemaField("runtime_ms", "INT64"),
+            bigquery.SchemaField("row_count", "INT64"),
+            bigquery.SchemaField("attempt", "INT64"),
+            bigquery.SchemaField("error_type", "STRING"),
+            bigquery.SchemaField("error_message", "STRING"),
+            bigquery.SchemaField("dashboard_id", "STRING"),
+            bigquery.SchemaField("retrieval_enabled", "BOOL"),
+            bigquery.SchemaField("created_at", "TIMESTAMP"),
+        ]
+        try:
+            self.client.get_table(table_fqn)
+        except NotFound:
+            table_obj = bigquery.Table(table_fqn, schema=schema)
+            self.client.create_table(table_obj)
+        return table_fqn
+
+    def insert_ai_edit_telemetry(self, table_fqn: str, rows: List[Dict[str, Any]]) -> None:
+        errors = self.client.insert_rows_json(table_fqn, rows)
+        if errors:
+            raise RuntimeError(f"Failed to insert ai_edit_telemetry: {errors}")
+
     # ===== INFORMATION_SCHEMA helpers =====
     def get_table_row_count_info_schema(self, project_id: str, dataset_id: str, table_id: str) -> Optional[int]:
         try:

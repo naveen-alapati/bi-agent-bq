@@ -74,6 +74,8 @@ class RunKpiRequest(BaseModel):
 	filters: Optional[Dict[str, Any]] = None
 	date_column: Optional[str] = None
 	expected_schema: Optional[str] = None
+	preview_limit: Optional[int] = 0
+	validate_shape: Optional[bool] = False
 
 
 class RunKpiResponse(BaseModel):

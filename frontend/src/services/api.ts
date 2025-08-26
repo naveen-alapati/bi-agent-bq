@@ -34,8 +34,11 @@ export const api = {
     const r = await axios.post('/api/generate_kpis', { tables, k, prefer_cross })
     return r.data.kpis
   },
-  async runKpi(sql: string, filters?: any, date_column?: string, expected_schema?: string) {
-    const r = await axios.post('/api/run_kpi', { sql, filters, date_column, expected_schema })
+  async runKpi(sql: string, filters?: any, date_column?: string, expected_schema?: string, opts?: { preview_limit?: number, validate_shape?: boolean }) {
+    const payload: any = { sql, filters, date_column, expected_schema }
+    if (opts && typeof opts.preview_limit === 'number') payload.preview_limit = opts.preview_limit
+    if (opts && typeof opts.validate_shape === 'boolean') payload.validate_shape = opts.validate_shape
+    const r = await axios.post('/api/run_kpi', payload)
     return r.data.rows
   },
   async saveDashboard(payload: { id?: string, name: string, kpis: any[], layout?: any[], layouts?: any, selected_tables: any[], global_filters?: any, theme?: any, tabs?: any[], tab_layouts?: Record<string, any[]>, last_active_tab?: string, version?: string }) {

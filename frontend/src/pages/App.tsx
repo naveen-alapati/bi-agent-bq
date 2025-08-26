@@ -68,6 +68,7 @@ export default function App() {
   const [retrievalAssist, setRetrievalAssist] = useState<boolean>(() => {
     try { return JSON.parse(localStorage.getItem('retrievalAssist') || 'false') } catch { return false }
   })
+  const [aiTestStatus, setAiTestStatus] = useState<{ status: 'idle'|'running'|'success'|'error'; rows?: any[]; error?: string; runtimeMs?: number; attempt?: number }>({ status: 'idle' })
   
   // Add KPI Modal state
   const [addKpiModalOpen, setAddKpiModalOpen] = useState(false)
@@ -561,9 +562,87 @@ export default function App() {
         setKpis(next)
         setDirty(true)
         setAiEditKpi(next[idx])
+        // Auto-test immediately with preview limit and shape validation
+        void autoTestKpi(next[idx], 1)
       }
     }
     setAiTyping(false)
+  }
+
+  async function autoTestKpi(updated: any, attempt: number) {
+    try {
+      setAiTestStatus({ status: 'running', attempt })
+      const t0 = performance.now()
+      const rows = await api.runKpi(updated.sql, undefined, undefined, updated.expected_schema, { preview_limit: 100, validate_shape: true })
+      const runtimeMs = Math.round(performance.now() - t0)
+      // Shape validation client-side as backstop
+      const shapeWarn = validateShape(updated.expected_schema, rows)
+      if (shapeWarn) {
+        setAiTestStatus({ status: 'error', error: shapeWarn, attempt, runtimeMs })
+        // Feed back to AI up to 3 attempts
+        if (attempt < 3) {
+          await handleAutoFix(updated, shapeWarn, attempt)
+        }
+        return
+      }
+      setAiTestStatus({ status: 'success', rows: rows.slice(0, 10), runtimeMs, attempt })
+      // Update canvas card rows immediately
+      setRowsByKpi(prev => ({ ...prev, [updated.id]: rows }))
+      // Telemetry
+      void sendTelemetry(updated.id, true, runtimeMs, rows?.length || 0, attempt, '')
+    } catch (e: any) {
+      const errDetail = String(e?.response?.data?.detail?.message || e?.response?.data?.detail || e?.message || e)
+      setAiTestStatus({ status: 'error', error: errDetail, attempt })
+      // Telemetry
+      void sendTelemetry(updated.id, false, 0, 0, attempt, errDetail)
+      if (attempt < 3) {
+        await handleAutoFix(updated, errDetail, attempt)
+      }
+    }
+  }
+
+  async function handleAutoFix(updated: any, errorText: string, attempt: number) {
+    try {
+      setAiTyping(true)
+      const retryMsg = `The last test failed. Here is the error and current SQL. Please fix while preserving expected_schema and aliases. Error: ${errorText}`
+      const history = aiChat.map(m => ({ role: m.role, content: m.text }))
+      const res = await api.editKpiChat(updated, retryMsg, history, {})
+      if (res.reply) setAiChat(prev => [...prev, { role: 'assistant', text: res.reply }])
+      if (res.kpi) {
+        const idx = kpis.findIndex(x => x.id === updated.id)
+        if (idx >= 0) {
+          const next = [...kpis]
+          next[idx] = { ...next[idx], ...res.kpi }
+          setKpis(next)
+          setDirty(true)
+          setAiEditKpi(next[idx])
+          await autoTestKpi(next[idx], attempt + 1)
+        }
+      }
+    } finally {
+      setAiTyping(false)
+    }
+  }
+
+  function validateShape(expected: string, rows: any[]): string | null {
+    try {
+      const esc = (expected || '').toLowerCase()
+      if (!rows || !rows.length) return null
+      if (esc.startsWith('time')) {
+        if (!('x' in rows[0]) || !('y' in rows[0])) return 'Expected timeseries columns x,y not found'
+      } else if (esc.startsWith('cat') || esc === 'categorical') {
+        if (!('label' in rows[0]) || !('value' in rows[0])) return 'Expected categorical columns label,value not found'
+      } else if (esc.startsWith('dist')) {
+        if (!('label' in rows[0]) || !('value' in rows[0])) return 'Expected distribution columns label,value not found'
+      }
+      return null
+    } catch { return null }
+  }
+
+  async function sendTelemetry(kpiId: string, success: boolean, runtimeMs: number, rowCount: number, attempt: number, errorMessage: string) {
+    try {
+      await fetch('/api/ai_edit/telemetry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kpi_id: kpiId, action: 'auto_test', success, runtime_ms: runtimeMs, row_count: rowCount, attempt, error_message: errorMessage, retrieval_enabled: retrievalAssist, dashboard_id: routeId }) })
+    } catch {}
   }
 
   const visibleKpis = kpis.filter(k => (k.tabs && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview'))
@@ -875,6 +954,19 @@ export default function App() {
                 <div className="card-subtitle" style={{ marginBottom: 8 }}>Current KPI</div>
                 <pre style={{ whiteSpace: 'pre-wrap' }}><code>{aiEditKpi?.sql}</code></pre>
                 {aiEditKpi?.vega_lite_spec && <div className="card-subtitle" style={{ marginTop: 8 }}>Vega-Lite spec present</div>}
+                {aiTestStatus.status === 'running' && <div className="badge" style={{ marginTop: 8 }}>Testing...</div>}
+                {aiTestStatus.status === 'success' && (
+                  <div className="panel" style={{ marginTop: 8 }}>
+                    <div className="card-subtitle">Test passed in {aiTestStatus.runtimeMs} ms — preview rows</div>
+                    <pre style={{ maxHeight: 160, overflow: 'auto', fontSize: 11 }}><code>{JSON.stringify(aiTestStatus.rows||[], null, 2)}</code></pre>
+                  </div>
+                )}
+                {aiTestStatus.status === 'error' && (
+                  <div className="panel" style={{ marginTop: 8 }}>
+                    <div className="card-subtitle" style={{ color: 'crimson' }}>Test failed{aiTestStatus.attempt ? ` (attempt ${aiTestStatus.attempt})` : ''}:</div>
+                    <pre style={{ maxHeight: 120, overflow: 'auto', fontSize: 11 }}><code>{String(aiTestStatus.error||'')}</code></pre>
+                  </div>
+                )}
               </div>
             </div>
             <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', gap: 8, position: 'sticky', bottom: 0, background: 'var(--card)' }}>
