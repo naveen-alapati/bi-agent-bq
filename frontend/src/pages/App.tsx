@@ -3,7 +3,7 @@ import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { TableSelector } from '../ui/TableSelector'
 import { KPIList } from '../ui/KPIList'
 import { ChartRenderer } from '../ui/ChartRenderer'
-import { api } from '../services/api'
+import { api, setRetrievalAssistEnabled } from '../services/api'
 import '../styles.css'
 import GridLayout, { Layout } from 'react-grid-layout'
 import 'react-grid-layout/css/styles.css'
@@ -65,6 +65,9 @@ export default function App() {
   const [lineageOpen, setLineageOpen] = useState(false)
   const [lineageKpi, setLineageKpi] = useState<any>(null)
   const [lineageData, setLineageData] = useState<Lineage | null>(null)
+  const [retrievalAssist, setRetrievalAssist] = useState<boolean>(() => {
+    try { return JSON.parse(localStorage.getItem('retrievalAssist') || 'false') } catch { return false }
+  })
   
   // Add KPI Modal state
   const [addKpiModalOpen, setAddKpiModalOpen] = useState(false)
@@ -131,6 +134,10 @@ export default function App() {
   }, [isDragging, dragOffset])
 
   useEffect(() => { applyPalette(palette) }, [])
+
+  useEffect(() => {
+    setRetrievalAssistEnabled(retrievalAssist)
+  }, [retrievalAssist])
 
   const tabColors = [palette.primary, palette.accent, palette.warn, palette.surface]
   const colorForTab = (id: string, idx: number) => tabColors[idx % tabColors.length]
@@ -586,6 +593,13 @@ export default function App() {
       <div className={`app-grid ${!sidebarOpen ? 'app-grid--collapsed' : ''}`}>
         {(
           <div className={`sidebar ${!sidebarOpen ? 'is-collapsed' : ''}`} style={{ display: 'grid', gap: 12 }}>
+            {/* Retrieval Assist toggle at top */}
+            <div className="panel" style={{ padding: 10 }}>
+              <label className="card-subtitle" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" checked={retrievalAssist} onChange={e => setRetrievalAssist(e.target.checked)} />
+                Retrieval Assist (use prior edits)
+              </label>
+            </div>
             {/* left panels */}
             <div className="panel">
               <div className="section-title">Data</div>
