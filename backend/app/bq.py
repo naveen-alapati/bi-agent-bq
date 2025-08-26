@@ -323,275 +323,113 @@ class BigQueryService:
             ("selected_tables", "STRING"),
             ("global_filters", "STRING"),
             ("theme", "STRING"),
-            ("default_flag", "BOOL"),
+            ("updated_at", "TIMESTAMP"),
+            ("created_at", "TIMESTAMP"),
+            ("last_active_tab", "STRING"),
             ("tabs", "STRING"),
             ("tab_layouts", "STRING"),
-            ("last_active_tab", "STRING"),
-            ("created_at", "TIMESTAMP"),
-            ("updated_at", "TIMESTAMP"),
+            ("default_flag", "BOOL"),
+            ("version_tag", "STRING"),
         ]
         try:
-            table_obj = self.client.get_table(table_fqn)
-            existing = {f.name: f.field_type for f in table_obj.schema}
-            missing = [(n,t) for (n,t) in required if n not in existing]
-            for name, typ in missing:
-                ddl = f"ALTER TABLE `{table_fqn}` ADD COLUMN IF NOT EXISTS {name} {typ}"
-                self.client.query(ddl, location=self.location).result()
-            
-            # Migrate existing NULL default_flags to FALSE
-            self._migrate_null_default_flags(table_fqn)
+            tbl = self.client.get_table(table_fqn)
+            existing = {(f.name, f.field_type) for f in tbl.schema}
+            to_add = [bigquery.SchemaField(n, t) for n, t in required if (n, t) not in existing]
+            if to_add:
+                tbl.schema = list(tbl.schema) + to_add
+                self.client.update_table(tbl, ["schema"])
         except NotFound:
-            schema = [bigquery.SchemaField(n, t) for (n, t) in required]
-            table_obj = bigquery.Table(table_fqn, schema=schema)
-            self.client.create_table(table_obj)
+            schema = [bigquery.SchemaField(n, t) for n, t in required]
+            table = bigquery.Table(table_fqn, schema=schema)
+            self.client.create_table(table)
         return table_fqn
 
-    def set_default_dashboard(self, dashboard_id: str, dataset_id: str = "analytics_dash") -> None:
-        table = self.ensure_dashboards_table(dataset_id)
-        
-        # First, validate that the dashboard exists
-        sql = f"SELECT id FROM `{table}` WHERE id = @id LIMIT 1"
-        job = self.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id","STRING", dashboard_id)]), location=self.location)
-        rows = list(job)
-        if not rows:
-            raise ValueError(f"Dashboard with ID '{dashboard_id}' not found")
-        
-        # Clear previous default and set new one
-        # Use IS NOT DISTINCT FROM to handle NULL values properly
-        sql = f"""
-        UPDATE `{table}` SET default_flag = FALSE WHERE default_flag IS NOT DISTINCT FROM TRUE;
-        UPDATE `{table}` SET default_flag = TRUE WHERE id = @id;
-        """
-        job = self.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id","STRING", dashboard_id)]), location=self.location)
-        list(job)
-
-    def delete_dashboard(self, dashboard_id: str, dataset_id: str = "analytics_dash") -> None:
-        """Delete a dashboard and ensure another becomes default if needed."""
-        table = self.ensure_dashboards_table(dataset_id)
-        
-        # Check if the dashboard to be deleted is the default
-        sql = f"SELECT default_flag FROM `{table}` WHERE id = @id"
-        job = self.client.query(
-            sql,
-            job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", dashboard_id)]),
-            location=self.location,
-        )
-        rows = list(job)
-        is_default = rows[0]["default_flag"] if rows else False
-        
-        # Delete the dashboard
-        sql = f"DELETE FROM `{table}` WHERE id = @id"
-        job = self.client.query(
-            sql,
-            job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", dashboard_id)]),
-            location=self.location,
-        )
-        job.result()
-        
-        # If the deleted dashboard was the default, ensure another becomes default
-        if is_default:
-            self._ensure_default_dashboard_exists(dataset_id)
-
-    def clear_default_dashboards(self, dataset_id: str = "analytics_dash") -> None:
-        """Clear all default flags from dashboards."""
-        table = self.ensure_dashboards_table(dataset_id)
-        sql = f"UPDATE `{table}` SET default_flag = FALSE WHERE default_flag IS NOT DISTINCT FROM TRUE"
-        job = self.client.query(sql, location=self.location)
-        list(job)
-
-    def _ensure_default_dashboard_exists(self, dataset_id: str = "analytics_dash") -> None:
-        """Ensure at least one dashboard is marked as default. If none exists, mark the most recent one as default."""
-        table = self.ensure_dashboards_table(dataset_id)
-        
-        # Check if any dashboard has default_flag = TRUE
-        sql = f"SELECT COUNT(*) as count FROM `{table}` WHERE default_flag = TRUE"
-        rows = list(self.client.query(sql, location=self.location))
-        has_default = rows[0]["count"] > 0 if rows else False
-        
-        if not has_default:
-            # Find the most recently updated dashboard and mark it as default
-            sql = f"SELECT id FROM `{table}` ORDER BY updated_at DESC LIMIT 1"
-            rows = list(self.client.query(sql, location=self.location))
-            if rows:
-                dashboard_id = rows[0]["id"]
-                # Set this dashboard as default
-                sql = f"UPDATE `{table}` SET default_flag = TRUE WHERE id = @id"
-                job = self.client.query(
-                    sql, 
-                    job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id","STRING", dashboard_id)]), 
-                    location=self.location
-                )
-                list(job)
-
-    def get_default_dashboard(self, dataset_id: str = "analytics_dash") -> Optional[str]:
-        table = self.ensure_dashboards_table(dataset_id)
-        
-        # Ensure at least one dashboard is marked as default
-        self._ensure_default_dashboard_exists(dataset_id)
-        
-        # First try to find a dashboard with default_flag = TRUE
-        sql = f"SELECT id FROM `{table}` WHERE default_flag = TRUE LIMIT 1"
-        rows = list(self.client.query(sql, location=self.location))
-        if rows:
-            return rows[0]["id"]
-        
-        # If no default is set, fallback to the most recently updated dashboard
-        # This handles cases where default_flag is NULL or FALSE
-        sql = f"SELECT id FROM `{table}` ORDER BY updated_at DESC LIMIT 1"
-        rows = list(self.client.query(sql, location=self.location))
-        return rows[0]["id"] if rows else None
-
-    def get_most_recent_dashboard(self, dataset_id: str = "analytics_dash") -> Optional[str]:
-        table = self.ensure_dashboards_table(dataset_id)
-        # Get the most recently created dashboard
-        sql = f"""
-        WITH LatestVersions AS (
-            SELECT 
-                id, name, version, created_at, updated_at,
-                ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) as rn
-            FROM `{table}`
-        )
-        SELECT id 
-        FROM LatestVersions 
-        WHERE rn = 1 
-        ORDER BY created_at DESC 
-        LIMIT 1
-        """
-        rows = list(self.client.query(sql, location=self.location))
-        if rows:
-            return dict(rows[0])['id']
-        return None
-
-    def _next_patch(self, current: Optional[str]) -> str:
-        if not current:
-            return "1.0.0"
-        m = _re.match(r"(\d+)\.(\d+)\.(\d+)", current)
-        if not m:
-            return "1.0.0"
-        maj, mi, pa = map(int, m.groups())
-        return f"{maj}.{mi}.{pa+1}"
-
-    def save_dashboard(self, name: str, kpis: List[Dict[str, Any]], layout: Optional[List[Dict[str, Any]]], layouts: Optional[Dict[str, List[Dict[str, Any]]]], selected_tables: List[Dict[str, Any]], global_filters: Optional[Dict[str, Any]], theme: Optional[Dict[str, Any]], version: Optional[str] = None, dashboard_id: Optional[str] = None, dataset_id: str = "analytics_dash", tabs: Optional[List[Dict[str, Any]]] = None, tab_layouts: Optional[Dict[str, List[Dict[str, Any]]]] = None, last_active_tab: Optional[str] = None) -> Tuple[str, str]:
-        table = self.ensure_dashboards_table(dataset_id)
-        now = datetime.now(timezone.utc)
-        
-        # Check if this is an existing dashboard with the same name
-        existing_dashboard = None
-        if dashboard_id:
-            try:
-                rows = list(self.client.query(
-                    f"SELECT name FROM `{table}` WHERE id=@id ORDER BY updated_at DESC LIMIT 1",
-                    job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id","STRING", dashboard_id)]),
-                    location=self.location,
-                ))
-                if rows:
-                    existing_dashboard = dict(rows[0])
-            except Exception:
-                pass
-        
-        # If name changed, treat as new dashboard
-        if existing_dashboard and existing_dashboard.get('name') != name:
-            dashboard_id = None  # Reset ID to create new dashboard
-        
-        # Generate new ID if creating new dashboard
-        did = dashboard_id or uuid.uuid4().hex
-        
-        # Determine version - always create new version for existing dashboard
-        if dashboard_id and existing_dashboard:
-            try:
-                rows = list(self.client.query(
-                    f"SELECT version FROM `{table}` WHERE id=@id ORDER BY updated_at DESC LIMIT 1",
-                    job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id","STRING", dashboard_id)]),
-                    location=self.location,
-                ))
-                latest = dict(rows[0])['version'] if rows else None
-                ver = self._next_patch(latest)
-            except Exception:
-                ver = "1.0.0"
-        else:
-            ver = "1.0.0"
-        
-        # Create new record (don't update existing)
-        row = {
-            "id": did,
-            "name": name,
-            "version": ver,
-            "kpis": json.dumps(kpis),
-            "layout": json.dumps(layout or []),
-            "layouts": json.dumps(layouts or {}),
-            "selected_tables": json.dumps(selected_tables),
-            "global_filters": json.dumps(global_filters or {}),
-            "theme": json.dumps(theme or {}),
-            "tabs": json.dumps(tabs or []),
-            "tab_layouts": json.dumps(tab_layouts or {}),
-            "last_active_tab": (last_active_tab or "overview"),
-            "created_at": now.isoformat(),
-            "updated_at": now.isoformat(),
-        }
-        errors = self.client.insert_rows_json(table, [row])
+    def insert_dashboard(self, table_fqn: str, payload: Dict[str, Any]) -> str:
+        row = payload.copy()
+        if not row.get("id"):
+            row["id"] = str(uuid.uuid4())
+        row["updated_at"] = datetime.now(timezone.utc)
+        if not row.get("created_at"):
+            row["created_at"] = row["updated_at"]
+        errors = self.client.insert_rows_json(table_fqn, [row])
         if errors:
-            print(f"Dashboard save errors: {errors}")
-            raise RuntimeError(f"Failed to save dashboard: {errors}")
-        return did, ver
+            raise RuntimeError(f"Failed to insert: {errors}")
+        return row["id"]
 
-    def list_dashboards(self, dataset_id: str = "analytics_dash") -> List[Dict[str, Any]]:
-        table = self.ensure_dashboards_table(dataset_id)
-        # Return only the latest version of each dashboard, ordered by most recently created
-        sql = f"""
-        WITH LatestVersions AS (
-            SELECT 
-                id, name, version, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at,
-                ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) as rn
-            FROM `{table}`
-        )
-        SELECT id, name, version, created_at, updated_at
-        FROM LatestVersions 
-        WHERE rn = 1 
-        ORDER BY created_at DESC
-        """
-        rows = [dict(r) for r in self.client.query(sql, location=self.location)]
-        return rows
+    def update_dashboard(self, table_fqn: str, dashboard_id: str, payload: Dict[str, Any]) -> None:
+        payload = payload.copy()
+        payload["updated_at"] = datetime.now(timezone.utc)
+        rows_json = [payload]
+        errors = self.client.insert_rows_json(table_fqn, rows_json)
+        if errors:
+            raise RuntimeError(f"Failed to update: {errors}")
 
-    def get_dashboard(self, dashboard_id: str, dataset_id: str = "analytics_dash") -> Optional[Dict[str, Any]]:
-        table = self.ensure_dashboards_table(dataset_id)
-        # Always get the latest version of the dashboard
+    def get_dashboard(self, dataset_id: str, table: str, dashboard_id: str) -> Optional[Dict[str, Any]]:
+        tbl = f"{self.project_id}.{dataset_id}.{table}"
+        sql = f"SELECT * FROM `{tbl}` WHERE id=@did ORDER BY updated_at DESC LIMIT 1"
+        params = [bigquery.ScalarQueryParameter("did", "STRING", dashboard_id)]
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+        loc = self._get_dataset_location(dataset_id) or self.location
+        results = self.client.query(sql, job_config=job_config, location=loc).result()
+        rows = [dict(r) for r in results]
+        return rows[0] if rows else None
+
+    # --- Enterprise lineage helpers (INFORMATION_SCHEMA) ---
+    def get_table_info_is(self, dataset_id: str, table_id: str) -> Dict[str, Any]:
+        """Fetch table metadata from INFORMATION_SCHEMA.TABLES for a given dataset/table."""
         sql = f"""
-        SELECT id, name, version, kpis, layout, layouts, selected_tables, global_filters, theme, tabs, tab_layouts, last_active_tab, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at 
-        FROM `{table}` 
-        WHERE id=@id 
-        ORDER BY updated_at DESC 
+        SELECT table_catalog, table_schema, table_name, row_count
+        FROM `{self.project_id}.{dataset_id}.INFORMATION_SCHEMA.TABLES`
+        WHERE table_name = @tbl
         LIMIT 1
         """
-        job = self.client.query(
-            sql,
-            job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", dashboard_id)]),
-            location=self.location,
+        params = [bigquery.ScalarQueryParameter("tbl", "STRING", table_id)]
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+        loc = self._get_dataset_location(dataset_id) or self.location
+        try:
+            rs = list(self.client.query(sql, job_config=job_config, location=loc))
+            if not rs:
+                return {"table_catalog": self.project_id, "table_schema": dataset_id, "table_name": table_id, "row_count": None}
+            r = rs[0]
+            return {
+                "table_catalog": r.get("table_catalog"),
+                "table_schema": r.get("table_schema"),
+                "table_name": r.get("table_name"),
+                "row_count": int(r.get("row_count")) if r.get("row_count") is not None else None,
+            }
+        except Exception:
+            return {"table_catalog": self.project_id, "table_schema": dataset_id, "table_name": table_id, "row_count": None}
+
+    def get_columns_info_is(self, dataset_id: str, table_id: str) -> Dict[str, Dict[str, Any]]:
+        """Fetch column-level info (data type and description if available) from INFORMATION_SCHEMA."""
+        sql = f"""
+        WITH cols AS (
+          SELECT column_name, data_type
+          FROM `{self.project_id}.{dataset_id}.INFORMATION_SCHEMA.COLUMNS`
+          WHERE table_name = @tbl
+        ), descs AS (
+          SELECT field_path AS column_name, description
+          FROM `{self.project_id}.{dataset_id}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS`
+          WHERE table_name = @tbl
         )
-        rows = list(job)
-        if not rows:
-            return None
-        row = dict(rows[0])
-        def parse_json_field(val: Any) -> Any:
-            try:
-                return json.loads(val)
-            except Exception:
-                return val
-        return {
-            "id": row["id"],
-            "name": row["name"],
-            "version": row.get("version"),
-            "kpis": parse_json_field(row["kpis"]),
-            "layout": parse_json_field(row["layout"]),
-            "layouts": parse_json_field(row.get("layouts") or "{}"),
-            "selected_tables": parse_json_field(row["selected_tables"]),
-            "global_filters": parse_json_field(row.get("global_filters") or "{}"),
-            "theme": parse_json_field(row.get("theme") or "{}"),
-            "tabs": parse_json_field(row.get("tabs") or "[]"),
-            "tab_layouts": parse_json_field(row.get("tab_layouts") or "{}"),
-            "last_active_tab": row.get("last_active_tab") or "overview",
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
+        SELECT c.column_name, c.data_type, d.description
+        FROM cols c
+        LEFT JOIN descs d USING(column_name)
+        """
+        params = [bigquery.ScalarQueryParameter("tbl", "STRING", table_id)]
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+        loc = self._get_dataset_location(dataset_id) or self.location
+        out: Dict[str, Dict[str, Any]] = {}
+        try:
+            for r in self.client.query(sql, job_config=job_config, location=loc):
+                name = str(r.get("column_name"))
+                out[name.lower()] = {
+                    "dataType": r.get("data_type"),
+                    "description": r.get("description"),
+                }
+        except Exception:
+            pass
+        return out
 
     def ensure_kpi_catalog(self, dataset_id: str = "analytics_dash", table: str = "kpi_catalog") -> str:
         self.ensure_dataset(dataset_id)

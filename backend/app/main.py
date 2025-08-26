@@ -625,6 +625,49 @@ def lineage(payload: Dict[str, Any]):
 			raise HTTPException(status_code=400, detail="sql is required")
 		dialect = payload.get('dialect') or 'bigquery'
 		data = compute_lineage(sql, dialect=dialect)
+
+		# Enrich enterprise metadata from INFORMATION_SCHEMA (tables/columns)
+		try:
+			graph = data.get('graph') or {}
+			nodes = graph.get('nodes') or []
+			# Collect unique tables to lookup
+			table_ids = [n.get('id') for n in nodes if n.get('type') == 'table']
+			for tid in table_ids:
+				parts = str(tid).split('.')
+				if len(parts) >= 3:
+					proj, ds, tb = parts[0], parts[1], parts[2]
+					if proj == (bq_service.project_id or proj):
+						info = bq_service.get_table_info_is(ds, tb)
+						for n in nodes:
+							if n.get('id') == tid:
+								n['database'] = info.get('table_catalog') or n.get('database')
+								n['schema'] = info.get('table_schema') or n.get('schema')
+								n['rowCount'] = info.get('row_count')
+								n['owner'] = n.get('owner') or None
+						# Column metadata for this table
+					colinfo = bq_service.get_columns_info_is(ds, tb)
+					for n in nodes:
+						if n.get('type') == 'column':
+							cid = str(n.get('id') or '')
+							# normalize last identifier (column name)
+							last = cid.replace('"','').replace('`','').split('.')[-1].lower()
+							m = colinfo.get(last)
+							if m:
+								n['dataType'] = m.get('dataType')
+								n['description'] = m.get('description')
+		except Exception:
+			pass
+
+		# Set KPI owner placeholder
+		try:
+			graph = data.get('graph') or {}
+			nodes = graph.get('nodes') or []
+			for n in nodes:
+				if n.get('type') == 'kpi':
+					n['owner'] = 'Naveen Alapati'
+		except Exception:
+			pass
+
 		return data
 	except HTTPException:
 		raise
