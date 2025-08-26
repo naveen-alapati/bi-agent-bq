@@ -925,8 +925,8 @@ export default function Home() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999 }} onClick={() => setLineageOpen(false)}>
           <div 
             style={{ 
-              position: 'absolute', left: '50%', top: '50%', width: '58.5%', height: '58.5%', transform: 'translate(-50%, -50%)',
-              background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)'
+              position: 'absolute', left: '50%', top: '50%', width: '90%', height: '90%', transform: 'translate(-50%, -50%)',
+              background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)', resize: 'both', overflow: 'hidden'
             }}
             onClick={e => e.stopPropagation()}
           >
