@@ -502,6 +502,132 @@ class BigQueryService:
             out.append(row)
         return out
 
+    # ---- Dashboard helpers expected by API routes ----
+    def _next_patch(self, current: Optional[str]) -> str:
+        if not current:
+            return "1.0.0"
+        m = _re.match(r"(\d+)\.(\d+)\.(\d+)", current)
+        if not m:
+            return "1.0.0"
+        maj, mi, pa = map(int, m.groups())
+        return f"{maj}.{mi}.{pa+1}"
+
+    def save_dashboard(
+        self,
+        name: str,
+        kpis: List[Dict[str, Any]],
+        layout: Optional[List[Dict[str, Any]]],
+        layouts: Optional[Dict[str, List[Dict[str, Any]]]],
+        selected_tables: List[Dict[str, Any]],
+        global_filters: Optional[Dict[str, Any]],
+        theme: Optional[Dict[str, Any]],
+        version: Optional[str] = None,
+        dashboard_id: Optional[str] = None,
+        dataset_id: str = "analytics_dash",
+        tabs: Optional[List[Dict[str, Any]]] = None,
+        tab_layouts: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+        last_active_tab: Optional[str] = None,
+    ) -> Tuple[str, str]:
+        table = self.ensure_dashboards_table(dataset_id)
+        now = datetime.now(timezone.utc)
+        did = dashboard_id or uuid.uuid4().hex
+        # determine version
+        ver = "1.0.0"
+        if dashboard_id:
+            try:
+                rows = list(
+                    self.client.query(
+                        f"SELECT version FROM `{table}` WHERE id=@id ORDER BY updated_at DESC LIMIT 1",
+                        job_config=bigquery.QueryJobConfig(
+                            query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", dashboard_id)]
+                        ),
+                        location=self.location,
+                    )
+                )
+                latest = rows[0].get("version") if rows else None
+                ver = self._next_patch(latest)
+            except Exception:
+                ver = "1.0.0"
+        else:
+            ver = "1.0.0"
+        row = {
+            "id": did,
+            "name": name,
+            "version": ver,
+            "kpis": json.dumps(kpis or []),
+            "layout": json.dumps(layout or []),
+            "layouts": json.dumps(layouts or {}),
+            "selected_tables": json.dumps(selected_tables or []),
+            "global_filters": json.dumps(global_filters or {}),
+            "theme": json.dumps(theme or {}),
+            "tabs": json.dumps(tabs or []),
+            "tab_layouts": json.dumps(tab_layouts or {}),
+            "last_active_tab": last_active_tab or "overview",
+            "created_at": now,
+            "updated_at": now,
+        }
+        errors = self.client.insert_rows_json(table, [row])
+        if errors:
+            raise RuntimeError(f"Failed to save dashboard: {errors}")
+        return did, ver
+
+    def list_dashboards(self, dataset_id: str = "analytics_dash") -> List[Dict[str, Any]]:
+        table = self.ensure_dashboards_table(dataset_id)
+        sql = f"""
+        SELECT id, name, version,
+               CAST(created_at AS STRING) AS created_at,
+               CAST(updated_at AS STRING) AS updated_at
+        FROM `{table}`
+        ORDER BY updated_at DESC
+        """
+        rows = self.client.query(sql, location=self.location)
+        return [dict(r) for r in rows]
+
+    def get_most_recent_dashboard(self, dataset_id: str = "analytics_dash") -> Optional[str]:
+        table = self.ensure_dashboards_table(dataset_id)
+        sql = f"SELECT id FROM `{table}` ORDER BY updated_at DESC LIMIT 1"
+        rows = list(self.client.query(sql, location=self.location))
+        return rows[0]["id"] if rows else None
+
+    def get_dashboard(self, dashboard_id: str, dataset_id: str = "analytics_dash") -> Optional[Dict[str, Any]]:
+        table = self.ensure_dashboards_table(dataset_id)
+        sql = f"""
+        SELECT id, name, version, kpis, layout, layouts, selected_tables, global_filters, theme,
+               tabs, tab_layouts, last_active_tab,
+               CAST(created_at AS STRING) AS created_at,
+               CAST(updated_at AS STRING) AS updated_at
+        FROM `{table}`
+        WHERE id=@id
+        ORDER BY updated_at DESC
+        LIMIT 1
+        """
+        rows = list(
+            self.client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", dashboard_id)]),
+                location=self.location,
+            )
+        )
+        if not rows:
+            return None
+        row = dict(rows[0])
+        # parse json fields
+        def parse_json(val: Any, default: Any) -> Any:
+            try:
+                return json.loads(val) if isinstance(val, str) else (val if val is not None else default)
+            except Exception:
+                return default
+        row["kpis"] = parse_json(row.get("kpis"), [])
+        row["layout"] = parse_json(row.get("layout"), [])
+        row["layouts"] = parse_json(row.get("layouts"), {})
+        row["selected_tables"] = parse_json(row.get("selected_tables"), [])
+        row["global_filters"] = parse_json(row.get("global_filters"), {})
+        row["theme"] = parse_json(row.get("theme"), {})
+        row["tabs"] = parse_json(row.get("tabs"), [])
+        row["tab_layouts"] = parse_json(row.get("tab_layouts"), {})
+        row["last_active_tab"] = row.get("last_active_tab") or "overview"
+        return row
+
     def ensure_cxo_tables(self, dataset_id: str = "analytics_cxo") -> Tuple[str, str]:
         self.ensure_dataset(dataset_id)
         conv_fqn = f"{self.project_id}.{dataset_id}.cxo_conversations"
