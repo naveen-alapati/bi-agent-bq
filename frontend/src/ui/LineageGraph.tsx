@@ -7,7 +7,9 @@ type GraphEdge = { source: string; target: string; type: 'join' | 'join_table' |
 
 type JoinInfo = { id?: string; left_table?: string; right_table?: string; type?: string; on?: string; pairs?: { left: string; right: string }[] }
 
-export function LineageGraph({ graph, joins }: { graph: { nodes: GraphNode[]; edges: GraphEdge[] }; joins?: JoinInfo[] }) {
+type Outputs = { x?: string; y?: string; label?: string; value?: string }
+
+export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphNode[]; edges: GraphEdge[] }; joins?: JoinInfo[]; outputs?: Outputs }) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 800, h: 480 })
@@ -53,21 +55,66 @@ export function LineageGraph({ graph, joins }: { graph: { nodes: GraphNode[]; ed
     const NODE_WIDTH = 16
     const MARGIN = { top: 8, right: 8, bottom: 8, left: 8 }
 
+    // Derive friendly output labels from SQL expressions
+    function toTitleCase(s: string): string {
+      return s.split(/[_\s]+/g).map(w => w ? (w[0].toUpperCase() + w.slice(1)) : w).join(' ')
+    }
+    function lastIdentifier(expr: string): string {
+      const noQuotes = expr.replace(/["`]/g, '')
+      const parts = noQuotes.split('.')
+      return parts[parts.length - 1] || noQuotes
+    }
+    function friendlyFromColumn(expr: string): string {
+      return toTitleCase(lastIdentifier(expr))
+    }
+    function friendlyFromFunc(expr: string): string {
+      const m = expr.match(/^\s*(\w+)\s*\((.*)\)\s*$/i)
+      if (!m) return toTitleCase(expr.replace(/["`]/g, ''))
+      const fn = (m[1] || '').toLowerCase()
+      const arg = m[2] || ''
+      const fnMap: Record<string, string> = { avg: 'Average', sum: 'Total', count: 'Count', max: 'Max', min: 'Min' }
+      const base = fnMap[fn] || fn.toUpperCase()
+      // Try to extract a nice column name from arg: handle nested like DISTINCT col, or table.col
+      const argCol = lastIdentifier(arg.replace(/\bdistinct\s+/i, '').trim())
+      // Simple synonyms
+      const synonyms: Record<string, string> = { 'sale_price': 'Order Value', 'sales': 'Revenue' }
+      const prettyArg = synonyms[argCol] || toTitleCase(argCol)
+      if (fn === 'count' && /\*/.test(arg)) return 'Count'
+      return `${base} ${prettyArg}`
+    }
+    function stripAlias(sqlExpr?: string): string | undefined {
+      if (!sqlExpr) return undefined
+      // Remove trailing AS alias forms
+      return sqlExpr.replace(/\s+AS\s+\w+\s*$/i, '').trim()
+    }
+    const friendlyOutputs: Record<string, string> = {}
+    if (outputs) {
+      const entries: [keyof Outputs, string | undefined][] = [['label', outputs.label], ['value', outputs.value], ['x', outputs.x], ['y', outputs.y]]
+      for (const [key, val] of entries) {
+        const e = stripAlias(val)
+        if (!e) continue
+        if (/^\s*(avg|sum|count|min|max)\s*\(/i.test(e)) friendlyOutputs[String(key)] = friendlyFromFunc(e)
+        else friendlyOutputs[String(key)] = friendlyFromColumn(e)
+      }
+    }
+
     // Build nodes and links tailored for Sankey
     const baseNodes: Record<string, GraphNode> = {}
     for (const n of graph.nodes || []) {
       baseNodes[n.id] = { ...n }
-      if (!baseNodes[n.id].label) {
+      if (baseNodes[n.id].type === 'output' && friendlyOutputs[n.id]) {
+        baseNodes[n.id].label = friendlyOutputs[n.id]
+      } else if (!baseNodes[n.id].label) {
         baseNodes[n.id].label = n.type === 'table' ? (n.label || n.id.split('.').slice(-1)[0]) : (n.label || n.id)
       }
     }
 
     // Compute output dependencies by table to help route join -> outputs
-    const outputs = new Set<string>((graph.nodes || []).filter(n => (n.type === 'output' || n.type === 'metric')).map(n => n.id))
+    const outputsSet = new Set<string>((graph.nodes || []).filter(n => (n.type === 'output' || n.type === 'metric')).map(n => n.id))
     const derivesEdges = (graph.edges || []).filter(e => e.type === 'derives')
     const outputsByTable: Record<string, Set<string>> = {}
     for (const e of derivesEdges) {
-      if (!outputs.has(e.target)) continue
+      if (!outputsSet.has(e.target)) continue
       outputsByTable[e.source] = outputsByTable[e.source] || new Set<string>()
       outputsByTable[e.source].add(e.target)
     }
@@ -153,7 +200,7 @@ export function LineageGraph({ graph, joins }: { graph: { nodes: GraphNode[]; ed
     // Link labels
     const shortCol = (s: string) => {
       if (!s) return ''
-      const parts = String(s).replace(/[`]/g, '').split('.')
+      const parts = String(s).replace(/["`]/g, '').split('.')
       return parts.slice(-2).join('.')
     }
     const linkLabel = (d: any): string => {
@@ -178,7 +225,7 @@ export function LineageGraph({ graph, joins }: { graph: { nodes: GraphNode[]; ed
       return ''
     }
 
-    const labels = g.append('g')
+    g.append('g')
       .attr('class', 'link-labels')
       .selectAll('text')
       .data(sankeyData.links)
@@ -233,7 +280,7 @@ export function LineageGraph({ graph, joins }: { graph: { nodes: GraphNode[]; ed
         svg.transition().duration(350).call(zoom.transform as any, d3.zoomIdentity.translate(tx, ty).scale(scale))
       }
     }, 0)
-  }, [graph, joins, size.w, size.h])
+  }, [graph, joins, outputs, size.w, size.h])
 
   return (
     <div ref={wrapRef} style={{ width: '100%', height: '100%' }}>
