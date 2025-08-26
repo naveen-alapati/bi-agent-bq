@@ -39,6 +39,8 @@ export default function KPIDraft() {
 	const [chatLoading, setChatLoading] = useState(false)
 	const [chatProposals, setChatProposals] = useState<any[] | null>(null)
 	const chatScrollRef = useRef<HTMLDivElement | null>(null)
+	const [autoAsked, setAutoAsked] = useState(false)
+	const [autoAskLoading, setAutoAskLoading] = useState(false)
 
 	useEffect(() => {
 		try {
@@ -60,6 +62,25 @@ export default function KPIDraft() {
 		const el = chatScrollRef.current
 		if (el) el.scrollTop = el.scrollHeight
 	}, [chatHistory, chatLoading])
+
+	// Auto-ask analyst for proposals when coming from Add KPI flow (no drafts yet but tables selected)
+	useEffect(() => {
+		if (autoAsked) return
+		if (drafts.length === 0 && Array.isArray(selectedTables) && selectedTables.length > 0) {
+			setAutoAskLoading(true)
+			setAutoAsked(true)
+			;(async () => {
+				try {
+					const prompt = "Propose 3–5 high-impact cross-table KPIs with runnable BigQuery SQL using the selected tables. If joins are insufficient, list missing keys per KPI."
+					const res = await api.analystChat(prompt, drafts, selectedTables, [], true)
+					setChatHistory(prev => [...prev, { role: 'user', content: prompt }])
+					if (res.reply) setChatHistory(prev => [...prev, { role: 'assistant', content: res.reply }])
+					if (Array.isArray(res.kpis) && res.kpis.length) setChatProposals(res.kpis)
+				} catch (e) {}
+				finally { setAutoAskLoading(false) }
+			})()
+		}
+	}, [drafts, selectedTables, autoAsked])
 
 	function parseSources(k: any): { cross: boolean; sources: string[] } {
 		try {
