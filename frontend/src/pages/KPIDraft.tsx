@@ -42,6 +42,11 @@ export default function KPIDraft() {
 	const [autoAsked, setAutoAsked] = useState(false)
 	const [autoAskLoading, setAutoAskLoading] = useState(false)
 
+	// SQL modal state
+	const [sqlOpen, setSqlOpen] = useState(false)
+	const [sqlContent, setSqlContent] = useState<string>('')
+	const [sqlTitle, setSqlTitle] = useState<string>('SQL Query')
+
 	useEffect(() => {
 		try {
 			sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts, selectedTables }))
@@ -261,7 +266,7 @@ export default function KPIDraft() {
 										<div className="card-subtitle">Chart: {k.chart_type}</div>
 									</div>
 																	<div className="toolbar">
-									<button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
+									<button className="btn btn-sm" onClick={() => { setSqlTitle(k.name ? `SQL – ${k.name}` : 'SQL Query'); setSqlContent(k.sql || ''); setSqlOpen(true) }}>View SQL</button>
 									<button className="btn btn-sm" onClick={() => addProposalToDrafts(k)}>Add to Drafts</button>
 									<button className="btn btn-sm" onClick={() => testOne(k)} disabled={testing[k.id]?.status === 'loading'}>Test</button>
 									{testing[k.id]?.status === 'success' && <span style={{ color: 'green', fontSize: 12 }}>OK</span>}
@@ -306,6 +311,29 @@ export default function KPIDraft() {
 					</div>
 				</div>
 			</div>
+
+		{sqlOpen && (
+			<div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999 }} onClick={() => setSqlOpen(false)}>
+				<div 
+					style={{ 
+						position: 'absolute', left: '50%', top: '50%', width: 'min(840px, 92vw)', height: 'min(70vh, 85vh)', transform: 'translate(-50%, -50%)',
+						background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)', display: 'flex', flexDirection: 'column'
+					}}
+					onClick={e => e.stopPropagation()}
+				>
+					<div className="card-header">
+						<div className="card-title">{sqlTitle}</div>
+						<div className="card-actions">
+							<button className="btn btn-sm" onClick={() => { try { navigator.clipboard.writeText(sqlContent) } catch {} }}>Copy</button>
+							<button className="btn btn-sm" onClick={() => setSqlOpen(false)}>✕</button>
+						</div>
+					</div>
+					<div style={{ padding: 12, overflow: 'auto' }}>
+						<pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 12 }}><code>{sqlContent}</code></pre>
+					</div>
+				</div>
+			</div>
+		)}
 		</div>
 	)
 }

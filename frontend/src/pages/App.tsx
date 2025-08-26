@@ -70,6 +70,11 @@ export default function App() {
   })
   const [aiTestStatus, setAiTestStatus] = useState<{ status: 'idle'|'running'|'success'|'error'; rows?: any[]; error?: string; runtimeMs?: number; attempt?: number }>({ status: 'idle' })
   
+  // SQL modal state
+  const [sqlOpen, setSqlOpen] = useState(false)
+  const [sqlContent, setSqlContent] = useState<string>('')
+  const [sqlTitle, setSqlTitle] = useState<string>('SQL Query')
+  
   // Add KPI Modal state
   const [addKpiModalOpen, setAddKpiModalOpen] = useState(false)
   const [addKpiDescription, setAddKpiDescription] = useState('')
@@ -674,9 +679,10 @@ export default function App() {
           <div className={`sidebar ${!sidebarOpen ? 'is-collapsed' : ''}`} style={{ display: 'grid', gap: 12 }}>
             {/* Retrieval Assist toggle at top */}
             <div className="panel" style={{ padding: 10 }}>
-              <label className="card-subtitle" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label className="switch card-subtitle" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <input type="checkbox" checked={retrievalAssist} onChange={e => setRetrievalAssist(e.target.checked)} />
-                Retrieval Assist (use prior edits)
+                <span className="slider" aria-hidden="true"></span>
+                <span className="switch-label">Retrieval Assist (use prior edits)</span>
               </label>
             </div>
             {/* left panels */}
@@ -882,7 +888,7 @@ export default function App() {
                   </div>
                   <div className="card-actions no-drag">
                     <button className="btn btn-sm" onClick={() => runKpi(k)}>Test</button>
-                    <button className="btn btn-sm" onClick={() => window.alert(k.sql)}>View SQL</button>
+                    <button className="btn btn-sm" onClick={() => { setSqlTitle(k.name ? `SQL – ${k.name}` : 'SQL Query'); setSqlContent(k.sql || ''); setSqlOpen(true) }}>View SQL</button>
                     <button className="btn btn-sm" onClick={() => openAiEdit(k)}>AI Edit</button>
                     <button className="btn btn-sm" onClick={() => openLineage(k)}>KPI Lineage</button>
                     <button className="btn btn-sm" onClick={async () => {
@@ -1226,8 +1232,8 @@ export default function App() {
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       <button 
                         className="btn btn-sm" 
-                        onClick={() => window.alert(addKpiGeneratedKpi.sql)}
-                        title="View SQL in alert"
+                        onClick={() => { setSqlTitle('SQL Query'); setSqlContent(addKpiGeneratedKpi.sql || ''); setSqlOpen(true) }}
+                        title="View SQL"
                       >
                         View SQL
                       </button>
@@ -1271,6 +1277,29 @@ export default function App() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sqlOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999 }} onClick={() => setSqlOpen(false)}>
+          <div 
+            style={{ 
+              position: 'absolute', left: '50%', top: '50%', width: 'min(840px, 92vw)', height: 'min(70vh, 85vh)', transform: 'translate(-50%, -50%)',
+              background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)', display: 'flex', flexDirection: 'column'
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="card-header">
+              <div className="card-title">{sqlTitle}</div>
+              <div className="card-actions">
+                <button className="btn btn-sm" onClick={() => { try { navigator.clipboard.writeText(sqlContent) } catch {} }}>Copy</button>
+                <button className="btn btn-sm" onClick={() => setSqlOpen(false)}>✕</button>
+              </div>
+            </div>
+            <div style={{ padding: 12, overflow: 'auto' }}>
+              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 12 }}><code>{sqlContent}</code></pre>
             </div>
           </div>
         </div>
