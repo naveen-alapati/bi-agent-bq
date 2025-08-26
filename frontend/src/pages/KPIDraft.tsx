@@ -75,7 +75,16 @@ export default function KPIDraft() {
 					const res = await api.analystChat(prompt, drafts, selectedTables, [], true)
 					setChatHistory(prev => [...prev, { role: 'user', content: prompt }])
 					if (res.reply) setChatHistory(prev => [...prev, { role: 'assistant', content: res.reply }])
-					if (Array.isArray(res.kpis) && res.kpis.length) setChatProposals(res.kpis)
+					if (Array.isArray(res.kpis) && res.kpis.length) {
+						setChatProposals(res.kpis)
+					} else {
+						// Fallback: generate proposals directly if chat returned no structured KPIs
+						try { await api.prepare(selectedTables, 5) } catch {}
+						try {
+							const more = await api.generateKpis(selectedTables, 5, true)
+							setChatProposals(more)
+						} catch {}
+					}
 				} catch (e) {}
 				finally { setAutoAskLoading(false) }
 			})()
