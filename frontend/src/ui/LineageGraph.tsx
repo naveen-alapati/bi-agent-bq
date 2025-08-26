@@ -83,8 +83,8 @@ export function LineageGraph({ graph, joins }: { graph: { nodes: GraphNode[]; ed
 
       const lt = j.left_table || ''
       const rt = j.right_table || ''
-      if (lt) syntheticJoinLinks.push({ source: lt, target: joinId, type: 'join_in', meta: { on: j.on, side: 'left', id: j.id } })
-      if (rt) syntheticJoinLinks.push({ source: rt, target: joinId, type: 'join_in', meta: { on: j.on, side: 'right', id: j.id } })
+      if (lt) syntheticJoinLinks.push({ source: lt, target: joinId, type: 'join_in', meta: { on: j.on, side: 'left', id: j.id, pairs: j.pairs || [] } })
+      if (rt) syntheticJoinLinks.push({ source: rt, target: joinId, type: 'join_in', meta: { on: j.on, side: 'right', id: j.id, pairs: j.pairs || [] } })
 
       // Route join -> outputs where either side contributes
       const contributingOutputs = new Set<string>()
@@ -149,6 +149,49 @@ export function LineageGraph({ graph, joins }: { graph: { nodes: GraphNode[]; ed
       .attr('stroke-linecap', 'round')
 
     link.append('title').text((d: any) => `${d.source?.label || d.source?.id} → ${d.target?.label || d.target?.id}`)
+
+    // Link labels
+    const shortCol = (s: string) => {
+      if (!s) return ''
+      const parts = String(s).replace(/[`]/g, '').split('.')
+      return parts.slice(-2).join('.')
+    }
+    const linkLabel = (d: any): string => {
+      const t = d._type
+      if (t === 'join_in') {
+        const pairs = Array.isArray(d._meta?.pairs) ? d._meta.pairs : []
+        const side = d._meta?.side === 'right' ? 'right' : 'left'
+        const cols = pairs.map((p: any) => side === 'left' ? shortCol(p.left) : shortCol(p.right)).filter(Boolean)
+        if (!cols.length) return ''
+        const text = cols.slice(0, 3).join(', ')
+        return cols.length > 3 ? `${text}…` : text
+      }
+      if (t === 'join_out') {
+        return d._meta?.id ? String(d._meta.id) : 'JOIN'
+      }
+      if (t === 'contains') {
+        return shortCol(d.target?.id || '')
+      }
+      if (t === 'projection') {
+        return shortCol(d.source?.id || '')
+      }
+      return ''
+    }
+
+    const labels = g.append('g')
+      .attr('class', 'link-labels')
+      .selectAll('text')
+      .data(sankeyData.links)
+      .enter()
+      .append('text')
+      .attr('x', (d: any) => (d.source?.x1 + d.target?.x0) / 2)
+      .attr('y', (d: any) => (d.y0 + d.y1) / 2)
+      .attr('text-anchor', 'middle')
+      .attr('dy', '0.35em')
+      .attr('font-size', 10)
+      .attr('fill', 'currentColor')
+      .style('pointer-events', 'none')
+      .text((d: any) => linkLabel(d))
 
     // Draw nodes
     const node = g.append('g')
