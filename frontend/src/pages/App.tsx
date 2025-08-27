@@ -222,9 +222,9 @@ export default function App() {
     try {
       await api.prepare(selected, 5)
       const kpisResp = await api.generateKpis(selected, 5, preferCross)
-      try { sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts: kpisResp, selectedTables: selected })) } catch {}
-      toast('success', `Generated ${kpisResp.length} KPIs. Review and publish from KPI Draft.`)
-      navigate('/kpi-draft', { state: { drafts: kpisResp, selectedTables: selected } })
+      try { sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts: [], proposals: kpisResp, selectedTables: selected })) } catch {}
+      toast('success', `Generated ${kpisResp.length} KPIs. Review under Proposed and add to Drafts.`)
+      navigate('/kpi-draft', { state: { drafts: [], proposals: kpisResp, selectedTables: selected } })
     } catch (error) {
       console.error('Failed to analyze tables:', error)
       toast('error', 'Failed to analyze tables. Please try again.')

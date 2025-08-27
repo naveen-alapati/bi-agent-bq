@@ -37,7 +37,17 @@ export default function KPIDraft() {
 	const [chatHistory, setChatHistory] = useState<{ role: 'user'|'assistant'; content: string }[]>([])
 	const [chatInput, setChatInput] = useState('')
 	const [chatLoading, setChatLoading] = useState(false)
-	const [chatProposals, setChatProposals] = useState<any[] | null>(null)
+	const [chatProposals, setChatProposals] = useState<any[] | null>(() => {
+		try {
+			if (initial && Array.isArray(initial.proposals)) return initial.proposals
+			const saved = sessionStorage.getItem('kpiDrafts')
+			if (!saved) return null
+			const parsed = JSON.parse(saved)
+			return Array.isArray(parsed?.proposals) ? parsed.proposals : null
+		} catch {
+			return null
+		}
+	})
 	const chatScrollRef = useRef<HTMLDivElement | null>(null)
 	const [autoAsked, setAutoAsked] = useState(false)
 	const [autoAskLoading, setAutoAskLoading] = useState(false)
@@ -49,9 +59,9 @@ export default function KPIDraft() {
 
 	useEffect(() => {
 		try {
-			sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts, selectedTables }))
+			sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts, proposals: Array.isArray(chatProposals) ? chatProposals : [], selectedTables }))
 		} catch {}
-	}, [drafts, selectedTables])
+	}, [drafts, selectedTables, chatProposals])
 
 	useEffect(() => {
 		// Send initial message to Analyst with current drafts and selected tables
@@ -94,7 +104,7 @@ export default function KPIDraft() {
 				finally { setAutoAskLoading(false) }
 			})()
 		}
-	}, [drafts, selectedTables, autoAsked])
+	}, [drafts, selectedTables, autoAsked, chatProposals])
 
 	function parseSources(k: any): { cross: boolean; sources: string[] } {
 		try {
@@ -217,7 +227,7 @@ export default function KPIDraft() {
 		try {
 			await api.prepare(selectedTables, 5)
 			const more = await api.generateKpis(selectedTables, 5, true)
-			setDrafts(prev => [...prev, ...more])
+			setChatProposals(prev => (Array.isArray(prev) ? [...prev, ...more] : more))
 		} catch (e) {}
 	}
 
