@@ -64,47 +64,12 @@ export default function KPIDraft() {
 	}, [drafts, selectedTables, chatProposals])
 
 	useEffect(() => {
-		// Send initial message to Analyst with current drafts and selected tables
-		if (chatHistory.length === 0 && drafts.length > 0) {
-			setTimeout(() => {
-				void sendChat("We have generated the following KPIs. Please propose high-value cross-table KPIs with runnable BigQuery SQL using provided table schemas and sample rows. If joins are insufficient, specify required keys.")
-			}, 0)
-		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [])
-
-	useEffect(() => {
 		const el = chatScrollRef.current
 		if (el) el.scrollTop = el.scrollHeight
 	}, [chatHistory, chatLoading])
 
-	// Auto-ask analyst for proposals when coming from Add KPI flow (no drafts yet but tables selected)
-	useEffect(() => {
-		if (autoAsked) return
-		if (drafts.length === 0 && Array.isArray(selectedTables) && selectedTables.length > 0) {
-			setAutoAskLoading(true)
-			setAutoAsked(true)
-			;(async () => {
-				try {
-					const prompt = "Propose 3–5 high-impact cross-table KPIs with runnable BigQuery SQL using the selected tables. If joins are insufficient, list missing keys per KPI."
-					const res = await api.analystChat(prompt, drafts, selectedTables, [], true)
-					setChatHistory(prev => [...prev, { role: 'user', content: prompt }])
-					if (res.reply) setChatHistory(prev => [...prev, { role: 'assistant', content: res.reply }])
-					if (Array.isArray(res.kpis) && res.kpis.length) {
-						setChatProposals(res.kpis)
-					} else {
-						// Fallback: generate proposals directly if chat returned no structured KPIs
-						try { await api.prepare(selectedTables, 5) } catch {}
-						try {
-							const more = await api.generateKpis(selectedTables, 5, true)
-							setChatProposals(more)
-						} catch {}
-					}
-				} catch (e) {}
-				finally { setAutoAskLoading(false) }
-			})()
-		}
-	}, [drafts, selectedTables, autoAsked, chatProposals])
+	// Auto-ask analyst for proposals when coming from Add KPI flow
+	// Previously this effect would auto-send prompts and populate chat. We now rely on explicit user actions.
 
 	function parseSources(k: any): { cross: boolean; sources: string[] } {
 		try {
@@ -157,7 +122,7 @@ export default function KPIDraft() {
 				const res = await api.analystChat(msg, drafts, selectedTables, chatHistory, true)
 				setChatHistory(prev => [...prev, { role: 'user', content: msg }])
 				if (res.reply) setChatHistory(prev => [...prev, { role: 'assistant', content: res.reply }])
-				if (Array.isArray(res.kpis) && res.kpis.length) setChatProposals(res.kpis)
+				if (Array.isArray(res.kpis) && res.kpis.length) setChatProposals(prev => (Array.isArray(prev) ? [...prev, ...res.kpis] : res.kpis))
 			} catch {}
 		}
 	}
@@ -199,7 +164,7 @@ export default function KPIDraft() {
 			const res = await api.analystChat(msg, drafts, selectedTables, chatHistory, true)
 			setChatHistory(prev => [...prev, { role: 'assistant', content: res.reply }])
 			if (Array.isArray(res.kpis) && res.kpis.length) {
-				setChatProposals(res.kpis)
+				setChatProposals(prev => (Array.isArray(prev) ? [...prev, ...res.kpis] : res.kpis))
 			}
 		} catch (e: any) {
 			setChatHistory(prev => [...prev, { role: 'assistant', content: `Sorry, I hit an error: ${String(e?.response?.data?.detail || e?.message || e)}` }])
