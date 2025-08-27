@@ -48,12 +48,6 @@ export default function KPIDraft() {
 	const [sqlTitle, setSqlTitle] = useState<string>('SQL Query')
 
 	useEffect(() => {
-		try {
-			sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts, selectedTables }))
-		} catch {}
-	}, [drafts, selectedTables])
-
-	useEffect(() => {
 		// Send initial message to Analyst with current drafts and selected tables
 		if (chatHistory.length === 0 && drafts.length > 0) {
 			setTimeout(() => {
@@ -69,6 +63,12 @@ export default function KPIDraft() {
 		const el = chatScrollRef.current
 		if (el) el.scrollTop = el.scrollHeight
 	}, [chatHistory, chatLoading])
+
+	useEffect(() => {
+		try {
+			sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts, selectedTables }))
+		} catch {}
+	}, [drafts, selectedTables])
 
 	// Auto-ask analyst for proposals when coming from Add KPI flow (no drafts yet but tables selected)
 	useEffect(() => {
