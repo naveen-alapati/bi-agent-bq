@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react'
-import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
+import { useParams, useSearchParams, useNavigate, useLocation } from 'react-router-dom'
 import { TableSelector } from '../ui/TableSelector'
 import { KPIList } from '../ui/KPIList'
 import { ChartRenderer } from '../ui/ChartRenderer'
@@ -18,6 +18,7 @@ export default function App() {
   const params = useParams()
   const [search] = useSearchParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const routeId = params.id || search.get('dashboardId') || ''
   const [datasets, setDatasets] = useState<any[]>([])
   const [selected, setSelected] = useState<{datasetId: string, tableId: string}[]>([])
@@ -222,9 +223,9 @@ export default function App() {
     try {
       await api.prepare(selected, 5)
       const kpisResp = await api.generateKpis(selected, 5, preferCross)
-      try { sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts: [], proposals: kpisResp, selectedTables: selected, dashboardId: routeId })) } catch {}
+      try { sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts: [], proposals: kpisResp, selectedTables: selected, dashboardId: routeId, returnPath: `${location.pathname}${location.search}` })) } catch {}
       toast('success', `Generated ${kpisResp.length} KPIs. Review under Proposed and add to Drafts.`)
-      navigate('/kpi-draft', { state: { drafts: [], proposals: kpisResp, selectedTables: selected, dashboardId: routeId } })
+      navigate('/kpi-draft', { state: { drafts: [], proposals: kpisResp, selectedTables: selected, dashboardId: routeId, returnPath: `${location.pathname}${location.search}` } })
     } catch (error) {
       console.error('Failed to analyze tables:', error)
       toast('error', 'Failed to analyze tables. Please try again.')
@@ -452,9 +453,9 @@ export default function App() {
 
   function openAddKpiModal() {
     try {
-      sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts: [], selectedTables: selected, dashboardId: routeId }))
+      sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts: [], selectedTables: selected, dashboardId: routeId, returnPath: `${location.pathname}${location.search}` }))
     } catch {}
-    navigate('/kpi-draft', { state: { drafts: [], selectedTables: selected, dashboardId: routeId } })
+    navigate('/kpi-draft', { state: { drafts: [], selectedTables: selected, dashboardId: routeId, returnPath: `${location.pathname}${location.search}` } })
   }
 
   async function handleAddKpiSubmit() {
