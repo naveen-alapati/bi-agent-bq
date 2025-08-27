@@ -8,6 +8,15 @@ export default function KPIDraft() {
 	const navigate = useNavigate()
 	const location = useLocation() as any
 	const initial = location.state && (location.state as any)
+	const [dashboardId, setDashboardId] = useState<string>(() => {
+		try {
+			if (initial && typeof initial.dashboardId === 'string' && initial.dashboardId) return initial.dashboardId
+			const saved = sessionStorage.getItem('kpiDrafts')
+			if (!saved) return ''
+			const parsed = JSON.parse(saved)
+			return typeof parsed?.dashboardId === 'string' ? parsed.dashboardId : ''
+		} catch { return '' }
+	})
 	const [drafts, setDrafts] = useState<any[]>(() => {
 		try {
 			if (initial && Array.isArray(initial.drafts)) return initial.drafts
@@ -59,9 +68,9 @@ export default function KPIDraft() {
 
 	useEffect(() => {
 		try {
-			sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts, proposals: Array.isArray(chatProposals) ? chatProposals : [], selectedTables }))
+			sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts, proposals: Array.isArray(chatProposals) ? chatProposals : [], selectedTables, dashboardId }))
 		} catch {}
-	}, [drafts, selectedTables, chatProposals])
+	}, [drafts, selectedTables, chatProposals, dashboardId])
 
 	useEffect(() => {
 		const el = chatScrollRef.current
@@ -146,7 +155,7 @@ export default function KPIDraft() {
 			}
 			try { sessionStorage.removeItem('kpiDrafts') } catch {}
 			window.alert(`Published ${groups.reduce((s, g) => s + g.items.length, 0)} KPI(s) to catalog`)
-			navigate('/editor')
+			navigate(dashboardId ? `/editor/${dashboardId}` : '/editor')
 		} catch (e: any) {
 			window.alert(`Failed to publish: ${String(e?.response?.data?.detail || e?.message || e)}`)
 		} finally {
@@ -222,7 +231,7 @@ export default function KPIDraft() {
 				<div className="panel">
 					<div className="section-title">Proposed KPIs</div>
 					<div className="toolbar" style={{ gap: 8 }}>
-						<button className="btn" onClick={() => navigate('/editor')}>Back to Editor</button>
+						<button className="btn" onClick={() => navigate(dashboardId ? `/editor/${dashboardId}` : '/editor')}>Back to Editor</button>
 						<button className="btn" onClick={() => selectAll(true)}>Select All</button>
 						<button className="btn" onClick={() => selectAll(false)}>Clear</button>
 						<button className="btn btn-primary" onClick={publishSelected} disabled={publishing}>

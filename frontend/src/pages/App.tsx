@@ -222,9 +222,9 @@ export default function App() {
     try {
       await api.prepare(selected, 5)
       const kpisResp = await api.generateKpis(selected, 5, preferCross)
-      try { sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts: [], proposals: kpisResp, selectedTables: selected })) } catch {}
+      try { sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts: [], proposals: kpisResp, selectedTables: selected, dashboardId: routeId })) } catch {}
       toast('success', `Generated ${kpisResp.length} KPIs. Review under Proposed and add to Drafts.`)
-      navigate('/kpi-draft', { state: { drafts: [], proposals: kpisResp, selectedTables: selected } })
+      navigate('/kpi-draft', { state: { drafts: [], proposals: kpisResp, selectedTables: selected, dashboardId: routeId } })
     } catch (error) {
       console.error('Failed to analyze tables:', error)
       toast('error', 'Failed to analyze tables. Please try again.')
@@ -452,9 +452,9 @@ export default function App() {
 
   function openAddKpiModal() {
     try {
-      sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts: [], selectedTables: selected }))
+      sessionStorage.setItem('kpiDrafts', JSON.stringify({ drafts: [], selectedTables: selected, dashboardId: routeId }))
     } catch {}
-    navigate('/kpi-draft', { state: { drafts: [], selectedTables: selected } })
+    navigate('/kpi-draft', { state: { drafts: [], selectedTables: selected, dashboardId: routeId } })
   }
 
   async function handleAddKpiSubmit() {
