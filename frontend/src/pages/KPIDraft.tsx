@@ -59,6 +59,7 @@ export default function KPIDraft() {
 			setTimeout(() => {
 				//void sendChat("We have generated the following KPIs. Please propose high-value cross-table KPIs with runnable BigQuery SQL using provided table schemas and sample rows. If joins are insufficient, specify required keys.")
 				setChatProposals(drafts)
+				drafts=[]
 			}, 0)
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
