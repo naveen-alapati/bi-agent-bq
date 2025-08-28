@@ -86,6 +86,7 @@ class KPIService:
 
     def prepare_tables(self, tables: List[TableRef], sample_rows: int = 5) -> List[PreparedTable]:
         content_rows: List[Tuple[str, str, str, str, str]] = []
+        issue_rows: List[Tuple[str, str, str]] = []  # (dataset_id, table_id, content)
         for t in tables:
             try:
                 schema = self.bq.get_table_schema(t.datasetId, t.tableId)
@@ -99,6 +100,28 @@ class KPIService:
             content_rows.append(("table_summary", t.datasetId, t.tableId, "summary", content))
             for idx, row in enumerate(samples):
                 content_rows.append(("sample_row", t.datasetId, t.tableId, f"row_{idx}", f"{row}"))
+
+            # Build compact table issue hints (heuristics)
+            try:
+                cols = {c.get('name',''): (c.get('type','') or '').upper() for c in (schema or [])}
+                num_nulls_hint = ""
+                # Leave placeholder hints; real null rates would come from profiling if available
+                date_cols = [n for n,tpe in cols.items() if 'DATE' in tpe or 'TIMESTAMP' in tpe]
+                bool_like = [n for n in cols if re.search(r"is_|_flag$|^flag_", n, re.I)]
+                text_like = [n for n,tpe in cols.items() if tpe in ("STRING", "BYTES")]
+                hints: List[str] = []
+                if date_cols:
+                    hints.append(f"partition_or_filter: {date_cols[0]}")
+                if bool_like:
+                    hints.append("booleans_may_be_strings")
+                if text_like and any('amount' in n.lower() or 'price' in n.lower() for n in cols):
+                    hints.append("unit_mismatch_check")
+                # Always include safe ops guidance
+                hints.append("prefer_SAFE_CAST_SAFE_DIVIDE")
+                if hints:
+                    issue_rows.append((t.datasetId, t.tableId, f"table: {t.datasetId}.{t.tableId} | issues: {', '.join(hints)}"))
+            except Exception:
+                pass
 
         table_fqn = f"{self.project_id}.{self.embedding_dataset}.table_embeddings"
         inserted = 0
@@ -126,6 +149,14 @@ class KPIService:
                 inserted = len(json_rows)
             except Exception:
                 raise emb_exc
+
+        # Insert table issue embeddings when using BQML mode, else skip silently
+        try:
+            if issue_rows and self.embeddings.mode == self.embeddings.mode.bigquery and self.embeddings.bqml_model_fqn:
+                issues_table = self.bq.ensure_table_issue_embeddings(self.embedding_dataset, table="table_issue_embeddings")
+                self.bq.insert_table_issue_embeddings_with_bqml(self.embeddings.bqml_model_fqn, issues_table, issue_rows)
+        except Exception:
+            pass
 
         try:
             count = self.bq.count_rows(table_fqn)

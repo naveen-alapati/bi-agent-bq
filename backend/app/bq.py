@@ -331,6 +331,134 @@ class BigQueryService:
         if errors:
             raise RuntimeError(f"Failed to insert ai_edit_telemetry: {errors}")
 
+    # ===== AI Edit Library (accepted examples) =====
+    def ensure_ai_edit_library_table(self, dataset_id: str, table: str = "ai_edit_library") -> str:
+        self.ensure_dataset(dataset_id)
+        table_fqn = f"{self.project_id}.{dataset_id}.{table}"
+        schema = [
+            bigquery.SchemaField("id", "STRING"),
+            bigquery.SchemaField("task_type", "STRING"),
+            bigquery.SchemaField("dialect", "STRING"),
+            bigquery.SchemaField("intent", "STRING"),
+            bigquery.SchemaField("rationale", "STRING"),
+            bigquery.SchemaField("sql_before", "STRING"),
+            bigquery.SchemaField("sql_after", "STRING"),
+            bigquery.SchemaField("chart_before", "STRING"),
+            bigquery.SchemaField("chart_after", "STRING"),
+            bigquery.SchemaField("kpi_before", "STRING"),
+            bigquery.SchemaField("kpi_after", "STRING"),
+            bigquery.SchemaField("tables_used", "STRING", mode="REPEATED"),
+            bigquery.SchemaField("accepted", "BOOL"),
+            bigquery.SchemaField("embedding", "FLOAT64", mode="REPEATED"),
+            bigquery.SchemaField("created_at", "TIMESTAMP"),
+        ]
+        try:
+            self.client.get_table(table_fqn)
+        except NotFound:
+            table_obj = bigquery.Table(table_fqn, schema=schema)
+            self.client.create_table(table_obj)
+        return table_fqn
+
+    def insert_ai_edit_library_rows(self, table_fqn: str, rows: List[Dict[str, Any]]) -> None:
+        errors = self.client.insert_rows_json(table_fqn, rows)
+        if errors:
+            raise RuntimeError(f"Failed to insert ai_edit_library: {errors}")
+
+    def insert_ai_edit_library_row_with_bqml_embedding(
+        self,
+        table_fqn: str,
+        embedding_model_fqn: str,
+        row: Dict[str, Any],
+    ) -> None:
+        """
+        Insert a single ai_edit_library row computing the embedding via BigQuery ML.
+        The embedding text is constructed from intent + sql_after (truncated) for stronger retrieval.
+        """
+        loc = self.location
+        sql = f"""
+        INSERT INTO `{table_fqn}` (
+          id, task_type, dialect, intent, rationale,
+          sql_before, sql_after, chart_before, chart_after, kpi_before, kpi_after,
+          tables_used, accepted, embedding, created_at
+        )
+        SELECT
+          GENERATE_UUID(),
+          @task_type, @dialect, @intent, @rationale,
+          @sql_before, @sql_after, @chart_before, @chart_after, @kpi_before, @kpi_after,
+          @tables_used, TRUE,
+          ML.GENERATE_EMBEDDING(MODEL `{embedding_model_fqn}`, @embed_text),
+          CURRENT_TIMESTAMP()
+        """
+        params: List[bigquery.ScalarQueryParameter] = []
+        params.append(bigquery.ScalarQueryParameter("task_type", "STRING", str(row.get("task_type") or "")))
+        params.append(bigquery.ScalarQueryParameter("dialect", "STRING", str(row.get("dialect") or "")))
+        params.append(bigquery.ScalarQueryParameter("intent", "STRING", (row.get("intent") or "")[:2000]))
+        params.append(bigquery.ScalarQueryParameter("rationale", "STRING", (row.get("rationale") or "")[:2000]))
+        params.append(bigquery.ScalarQueryParameter("sql_before", "STRING", (row.get("sql_before") or "")[:50000]))
+        params.append(bigquery.ScalarQueryParameter("sql_after", "STRING", (row.get("sql_after") or "")[:50000]))
+        params.append(bigquery.ScalarQueryParameter("chart_before", "STRING", (row.get("chart_before") or "")[:20000]))
+        params.append(bigquery.ScalarQueryParameter("chart_after", "STRING", (row.get("chart_after") or "")[:20000]))
+        params.append(bigquery.ScalarQueryParameter("kpi_before", "STRING", json.dumps(row.get("kpi_before") or {})[:20000]))
+        params.append(bigquery.ScalarQueryParameter("kpi_after", "STRING", json.dumps(row.get("kpi_after") or {})[:20000]))
+        tables_used = row.get("tables_used") or []
+        params.append(bigquery.ArrayQueryParameter("tables_used", "STRING", [str(x) for x in tables_used]))
+        embed_text = (str(row.get("intent") or "") + "\nSQL: " + str(row.get("sql_after") or ""))[:2000]
+        params.append(bigquery.ScalarQueryParameter("embed_text", "STRING", embed_text))
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+        self.client.query(sql, job_config=job_config, location=loc).result()
+
+    # ===== Table-level Issue Embeddings =====
+    def ensure_table_issue_embeddings(self, dataset_id: str, table: str = "table_issue_embeddings") -> str:
+        self.ensure_dataset(dataset_id)
+        table_fqn = f"{self.project_id}.{dataset_id}.{table}"
+        schema = [
+            bigquery.SchemaField("id", "STRING"),
+            bigquery.SchemaField("dataset_id", "STRING"),
+            bigquery.SchemaField("table_id", "STRING"),
+            bigquery.SchemaField("content", "STRING"),
+            bigquery.SchemaField("embedding", "FLOAT64", mode="REPEATED"),
+            bigquery.SchemaField("created_at", "TIMESTAMP"),
+        ]
+        try:
+            self.client.get_table(table_fqn)
+        except NotFound:
+            table_obj = bigquery.Table(table_fqn, schema=schema)
+            self.client.create_table(table_obj)
+        return table_fqn
+
+    def insert_table_issue_embeddings_with_bqml(
+        self,
+        embedding_model_fqn: str,
+        target_table_fqn: str,
+        rows: List[Tuple[str, str, str]],
+    ) -> int:
+        # rows: (dataset_id, table_id, content)
+        if not rows:
+            return 0
+        selects: List[str] = []
+        for ds, tb, content in rows:
+            esc_content = content.replace("'", "\\'")
+            selects.append(
+                f"SELECT '{ds}' AS dataset_id, '{tb}' AS table_id, '{esc_content}' AS content"
+            )
+        union_sql = " UNION ALL \n".join(selects)
+        sql = f"""
+        INSERT INTO `{target_table_fqn}` (id, dataset_id, table_id, content, embedding, created_at)
+        SELECT
+          GENERATE_UUID() AS id,
+          src.dataset_id,
+          src.table_id,
+          src.content,
+          ML.GENERATE_EMBEDDING(MODEL `{embedding_model_fqn}`, src.content) AS embedding,
+          CURRENT_TIMESTAMP() AS created_at
+        FROM (
+          {union_sql}
+        ) AS src
+        """
+        loc = self.location
+        self.client.query(sql, job_config=bigquery.QueryJobConfig(), location=loc).result()
+        return len(rows)
+
     # ===== INFORMATION_SCHEMA helpers =====
     def get_table_row_count_info_schema(self, project_id: str, dataset_id: str, table_id: str) -> Optional[int]:
         try:

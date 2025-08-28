@@ -74,6 +74,11 @@ export const api = {
     return r.data as { reply: string; kpi?: any }
   },
 
+  async acceptAiEditExample(payload: { intent: string; sql_before: string; sql_after: string; task_type?: string; dialect?: string; rationale?: string; kpi_before?: any; kpi_after?: any; tables_used?: string[] }) {
+    const r = await axios.post('/api/ai_edit/accept_example', payload)
+    return r.data as { status: 'ok' }
+  },
+
   async generateCustomKpi(tables: {datasetId: string, tableId: string}[], description: string, clarifyingQuestions?: string[], answers?: string[]) {
     const r = await axios.post('/api/generate_custom_kpi', { tables, description, clarifying_questions: clarifyingQuestions, answers })
     return r.data

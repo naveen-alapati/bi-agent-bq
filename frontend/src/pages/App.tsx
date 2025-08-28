@@ -596,6 +596,29 @@ export default function App() {
       setRowsByKpi(prev => ({ ...prev, [updated.id]: rows }))
       // Telemetry
       void sendTelemetry(updated.id, true, runtimeMs, rows?.length || 0, attempt, '')
+      // On first successful attempt after an edit, record accepted exemplar
+      try {
+        if (attempt === 1 && aiChat.length > 0) {
+          const lastUserMsg = [...aiChat].reverse().find(m => m.role === 'user')?.text || ''
+          const tablesUsed: string[] = []
+          try {
+            const re = /`([\w-]+\.[\w$-]+\.[\w$-]+)`/g
+            let m: RegExpExecArray | null
+            while ((m = re.exec(updated.sql || '')) !== null) { tablesUsed.push(m[1]) }
+          } catch {}
+          void api.acceptAiEditExample({
+            intent: lastUserMsg || 'Refinement',
+            sql_before: aiEditKpi?.sql || '',
+            sql_after: updated.sql || '',
+            task_type: 'KPI_UPDATE',
+            dialect: 'bigquery',
+            rationale: '',
+            kpi_before: aiEditKpi || {},
+            kpi_after: updated || {},
+            tables_used: Array.from(new Set(tablesUsed)),
+          })
+        }
+      } catch {}
     } catch (e: any) {
       const errDetail = String(e?.response?.data?.detail?.message || e?.response?.data?.detail || e?.message || e)
       setAiTestStatus({ status: 'error', error: errDetail, attempt })

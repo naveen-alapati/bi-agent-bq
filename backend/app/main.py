@@ -86,6 +86,75 @@ retrieval_plugin = RetrievalPlugin(
 	table=RETRIEVAL_TABLE,
 	top_k=5,
 )
+# Record accepted edit exemplars (SQL before/after, intent) into ai_edit_library
+@app.post("/api/ai_edit/accept_example")
+def ai_edit_accept_example(payload: Dict[str, Any]):
+	try:
+		# Required fields
+		intent = payload.get('intent') or ''
+		sql_before = payload.get('sql_before') or ''
+		sql_after = payload.get('sql_after') or ''
+		if not sql_after:
+			raise HTTPException(status_code=400, detail="sql_after is required")
+		# Optional
+		task_type = payload.get('task_type') or 'KPI_UPDATE'
+		dialect = payload.get('dialect') or 'bigquery'
+		rationale = payload.get('rationale') or ''
+		kpi_before = payload.get('kpi_before') or {}
+		kpi_after = payload.get('kpi_after') or {}
+		tables = payload.get('tables_used') or []
+		# Ensure table exists
+		lib_fqn = bq_service.ensure_ai_edit_library_table(BQ_DATASET_EMBED, table=RETRIEVAL_TABLE)
+		# Insert with embedding per provider
+		row = {
+			"task_type": task_type,
+			"dialect": dialect,
+			"intent": intent,
+			"rationale": rationale,
+			"sql_before": sql_before,
+			"sql_after": sql_after,
+			"chart_before": "",
+			"chart_after": "",
+			"kpi_before": kpi_before,
+			"kpi_after": kpi_after,
+			"tables_used": tables,
+		}
+		if embedding_service.mode == EmbeddingMode.bigquery:
+			model_fqn = embedding_service.bqml_model_fqn
+			if not model_fqn:
+				raise HTTPException(status_code=500, detail="BQ_EMBEDDING_MODEL_FQN not set for bigquery mode")
+			bq_service.insert_ai_edit_library_row_with_bqml_embedding(lib_fqn, model_fqn, row)
+		else:
+			# External provider: precompute embedding client-side and store via insert_rows_json
+			try:
+				embed_text = (str(intent or '') + "\nSQL: " + str(sql_after or '')).strip()
+				vec = embedding_service.embed_text(embed_text)
+				now = datetime.utcnow().isoformat()
+				json_row = {
+					"id": uuid.uuid4().hex,
+					"task_type": task_type,
+					"dialect": dialect,
+					"intent": intent,
+					"rationale": rationale,
+					"sql_before": sql_before,
+					"sql_after": sql_after,
+					"chart_before": "",
+					"chart_after": "",
+					"kpi_before": json.dumps(kpi_before)[:20000],
+					"kpi_after": json.dumps(kpi_after)[:20000],
+					"tables_used": tables,
+					"accepted": True,
+					"embedding": vec,
+					"created_at": now,
+				}
+				bq_service.insert_ai_edit_library_rows(lib_fqn, [json_row])
+			except Exception as exc:
+				raise HTTPException(status_code=500, detail=str(exc))
+		return {"status": "ok"}
+	except HTTPException:
+		raise
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
 
 
 def _extract_table_refs(sql: str) -> List[str]:
@@ -331,14 +400,20 @@ def edit_sql(payload: Dict[str, str], request: Request):
 					top_k=3,
 				)
 				ex = ret.get("examples") or []
+				issues = ret.get("tableIssues") or []
+				lines: List[str] = []
+				if issues:
+					lines.append("Respect table-level constraints and known issues:")
+					for it in issues[:5]:
+						lines.append(f"- {it[:200]}")
 				if ex:
-					# Append compact exemplars to the instruction to steer the model
-					lines: List[str] = ["Use prior accepted exemplars when rewriting. Examples:"]
+					lines.append("Use prior accepted exemplars when rewriting. Examples:")
 					for e in ex[:3]:
 						intent = (e.get("intent") or "").strip()
 						sql_after = (e.get("sql_after") or "").strip()
 						if sql_after:
 							lines.append(f"- Intent: {intent[:160]} | SQL: {sql_after[:400]}")
+				if lines:
 					aug_instruction = instruction + "\n\n" + "\n".join(lines)
 		except Exception:
 			pass
@@ -373,7 +448,13 @@ def edit_kpi(payload: Dict[str, str], request: Request):
 				)
 		except Exception:
 			retrieval = None
-		user = json.dumps({"kpi": original_kpi, "sql": original_sql, "instruction": instruction, "retrieval_examples": (retrieval or {}).get("examples", [])})
+		user = json.dumps({
+			"kpi": original_kpi,
+			"sql": original_sql,
+			"instruction": instruction,
+			"retrieval_examples": (retrieval or {}).get("examples", []),
+			"table_issues": (retrieval or {}).get("tableIssues", []),
+		})
 		resp = llm_client.generate_json(system, user)
 		updated_kpi = original_kpi.copy()
 		if isinstance(resp, dict):
@@ -428,7 +509,14 @@ def edit_kpi_chat(payload: Dict[str, Any], request: Request):
 				)
 		except Exception:
 			retrieval = None
-		user = json.dumps({"kpi": kpi, "message": message, "history": history[-10:], "context": ctx, "retrieval_examples": (retrieval or {}).get("examples", [])})
+		user = json.dumps({
+			"kpi": kpi,
+			"message": message,
+			"history": history[-10:],
+			"context": ctx,
+			"retrieval_examples": (retrieval or {}).get("examples", []),
+			"table_issues": (retrieval or {}).get("tableIssues", []),
+		})
 		resp = llm_client.generate_json(sys, user)
 		markdown = ""
 		updated = None

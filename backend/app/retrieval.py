@@ -37,6 +37,9 @@ class RetrievalPlugin:
 	def _table_fqn(self) -> str:
 		return f"{self.project_id}.{self.dataset}.{self.table}"
 
+	def _table_issues_fqn(self) -> str:
+		return f"{self.project_id}.{self.dataset}.table_issue_embeddings"
+
 	def retrieve(
 		self,
 		task_type: str,
@@ -52,12 +55,14 @@ class RetrievalPlugin:
 		k = int(top_k or self.top_k)
 		try:
 			table_fqn = self._table_fqn()
-			# Try to embed the intent for ANN search when supported
+			# Embed the intent for ANN search when supported; for BigQuery mode, we will use BQML inline
 			query_vector: Optional[List[float]] = None
+			use_bq_query_vector = False
 			try:
-				# Only external modes support on-the-fly embedding here
 				if self.embeddings.mode in (EmbeddingMode.vertex, EmbeddingMode.openai):
 					query_vector = self.embeddings.embed_text(intent_text or "")
+				else:
+					use_bq_query_vector = True
 			except Exception:
 				query_vector = None
 
@@ -90,6 +95,26 @@ class RetrievalPlugin:
 					LIMIT @k
 					"""
 				)
+			elif use_bq_query_vector:
+				sql = (
+					f"""
+					WITH q AS (
+					  SELECT ML.GENERATE_EMBEDDING(MODEL `{os.getenv('BQ_EMBEDDING_MODEL_FQN','')}`, @qtext) AS qvec
+					)
+					SELECT id, task_type, dialect, intent, rationale,
+					       sql_before, sql_after, chart_before, chart_after, kpi_before, kpi_after,
+					       created_at,
+					       SAFE_CAST(VECTOR_DISTANCE(embedding, q.qvec) AS FLOAT64) AS distance
+					FROM `{table_fqn}`, q
+					WHERE {' AND '.join(where_clauses)}
+					  AND embedding IS NOT NULL
+					  AND ARRAY_LENGTH(embedding) > 0
+					  AND VECTOR_SEARCH(embedding, q.qvec, @k)
+					ORDER BY distance
+					LIMIT @k
+					"""
+				)
+				params.append(bigquery.ScalarQueryParameter("qtext", "STRING", intent_text or ""))
 			else:
 				sql = (
 					f"""
@@ -125,7 +150,29 @@ class RetrievalPlugin:
 						"distance": float(r.get("distance")) if r.get("distance") is not None else None,
 					}
 				)
-			return {"examples": examples, "policyHints": []}
+			# Retrieve table-level issues (non-blocking)
+			issues: List[str] = []
+			try:
+				if tables:
+					issues_sql = (
+						f"""
+						SELECT content
+						FROM `{self._table_issues_fqn()}`
+						WHERE ARRAY_LENGTH(@tables) = 0 OR CONCAT(dataset_id,'.',table_id) IN UNNEST(@tables)
+						ORDER BY created_at DESC
+						LIMIT 20
+						"""
+					)
+					issues_job = self.bq.client.query(
+						issues_sql,
+						job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ArrayQueryParameter("tables", "STRING", tables)]),
+						location=self.bq.location,
+					)
+					for r in issues_job:
+						issues.append(r.get("content") or "")
+			except Exception:
+				issues = []
+			return {"examples": examples, "tableIssues": issues, "policyHints": []}
 		except Exception:
 			# Any failure yields empty results (non-blocking)
-			return {"examples": [], "policyHints": []}
+			return {"examples": [], "tableIssues": [], "policyHints": []}
