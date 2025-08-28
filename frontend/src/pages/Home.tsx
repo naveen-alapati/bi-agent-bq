@@ -298,13 +298,37 @@ export default function Home() {
 
   const [showFeed, setShowFeed] = useState(false)
 
-  async function quickSummary() {
-    if (!active) return
-    const context = {
+  function buildCxoContext(includeRows: boolean = true) {
+    if (!active) return {}
+    const visible = (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview'))
+    const layoutMap: Record<string, any> = {}
+    ;((layout || []) as any[]).forEach((l: any) => { if (l && l.i) layoutMap[l.i] = { x: l.x, y: l.y, w: l.w, h: l.h } })
+    const kpis = visible.map((k:any) => ({
+      id: k.id,
+      name: k.name,
+      chart_type: k.chart_type,
+      expected_schema: k.expected_schema,
+      engine: k.engine,
+      vega_lite_spec: k.vega_lite_spec,
+      filter_date_column: k.filter_date_column,
+      sql: typeof k.sql === 'string' ? (k.sql.length > 4000 ? k.sql.slice(0, 4000) : k.sql) : '',
+      layout: layoutMap[k.id] || null,
+      rows: includeRows ? (rowsByKpi[k.id] || []) : []
+    }))
+    return {
       dashboard_name: active.name,
       active_tab: activeTab,
-      kpis: (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview')).map((k:any) => ({ id: k.id, name: k.name, rows: rowsByKpi[k.id] || [] }))
+      filters: {
+        date: { from: localFilters.from, to: localFilters.to },
+        category: (localFilters.category && localFilters.category.column && localFilters.category.value) ? localFilters.category : undefined,
+      },
+      kpis,
     }
+  }
+
+  async function quickSummary() {
+    if (!active) return
+    const context = buildCxoContext(true)
     const id = convId || await api.cxoStart(active.id, active.name, activeTab)
     if (!convId) setConvId(id)
     const msg = 'Generate executive summary from available data.'
@@ -319,11 +343,7 @@ export default function Home() {
     setChat(prev => [...prev, { role: 'user', text: msg }])
     setInput('')
     setCxoTyping(true)
-    const context = {
-      dashboard_name: active.name,
-      active_tab: activeTab,
-      kpis: (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview')).map((k:any) => ({ id: k.id, name: k.name, rows: rowsByKpi[k.id] || [] }))
-    }
+    const context = buildCxoContext(true)
     const reply = await api.cxoSend(convId, msg, context)
     setChat(prev => [...prev, { role: 'assistant', text: reply }])
     setCxoTyping(false)
@@ -564,11 +584,7 @@ export default function Home() {
     if (!active) return
     const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
     // Summary page (current tab)
-    const context = {
-      dashboard_name: active.name,
-      active_tab: activeTab,
-      kpis: (active.kpis || []).filter((k:any) => (Array.isArray(k.tabs) && k.tabs.length ? k.tabs.includes(activeTab) : activeTab === 'overview')).map((k:any) => ({ id: k.id, name: k.name, rows: rowsByKpi[k.id] || [] }))
-    }
+    const context = buildCxoContext(true)
     const id = convId || await api.cxoStart(active.id, active.name, activeTab)
     const summary = await api.cxoSend(id, 'Generate executive summary from available data.', context)
     addSummaryPage(doc, active.name, summary)

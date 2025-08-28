@@ -616,16 +616,30 @@ def cxo_send(payload: Dict[str, Any]):
 		bq_service.add_cxo_message(conversation_id, role="user", content=message, embedding=user_emb)
 		# recent history (last 30 days)
 		history = bq_service.list_cxo_messages(conversation_id, days=30)
-		# build prompt from context (KPIs data summaries) and user message
+		# build prompt from context (KPIs + chart metadata) and user message
 		kpis = context.get('kpis') or []
 		active_tab = context.get('active_tab') or 'overview'
 		dashboard_name = context.get('dashboard_name') or ''
-		# Aggregate KPI data (capped)
-		kpis_with_data = []
+		filters = context.get('filters') or {}
+		# Aggregate KPI data (capped) and include metadata for precise reasoning
+		kpis_with_data: List[Dict[str, Any]] = []
 		for k in kpis:
 			rows = k.get('rows') or []
 			if rows:
-				kpis_with_data.append({"id": k.get('id'), "name": k.get('name'), "rows": rows[:100]})
+				item: Dict[str, Any] = {
+					"id": k.get('id'),
+					"name": k.get('name'),
+					"chart_type": k.get('chart_type'),
+					"expected_schema": k.get('expected_schema'),
+					"engine": k.get('engine'),
+					"filter_date_column": k.get('filter_date_column'),
+					"layout": k.get('layout'),
+					"sql": (k.get('sql') or '')[:4000],
+					"vega_lite_spec": k.get('vega_lite_spec'),
+					"row_count": len(rows),
+					"rows": rows,
+				}
+				kpis_with_data.append(item)
 		if not kpis_with_data:
 			resp_md = "No data is available for the current tab. Run or refresh KPIs to generate a summary."
 			bq_service.add_cxo_message(conversation_id, role="assistant", content=resp_md, embedding=[])
@@ -633,7 +647,7 @@ def cxo_send(payload: Dict[str, Any]):
 		# System and user directives
 		sys = (
 			"You are CXO AI Assist for a CEO named Naveen Alapati. Professional strategist tone. "
-			"Use only the provided KPI data rows and recent chat history (last 30 days). Be interactive: "
+			"Use only the provided KPI data rows, chart metadata (chart_type, expected_schema, vega-lite spec), filters, and recent chat history (last 30 days). Be interactive: "
 			"- If user asks broadly (e.g., 'areas that need attention'), list top 2–3 options and ask which one to drill into. "
 			"- If user says 'Pick one', choose the highest urgency/risk item. "
 			"- Avoid repeating prior summaries; add incremental insights. "
@@ -652,6 +666,7 @@ def cxo_send(payload: Dict[str, Any]):
 			),
 			"dashboard": dashboard_name,
 			"active_tab": active_tab,
+			"filters": filters,
 			"kpis": kpis_with_data,
 			"history": history[-20:],
 			"question": message,
