@@ -140,7 +140,15 @@ export default function KPIDraft() {
 				const res = await api.analystChat(msg, drafts, selectedTables, chatHistory, true)
 				setChatHistory(prev => [...prev, { role: 'user', content: msg }])
 				if (res.reply) setChatHistory(prev => [...prev, { role: 'assistant', content: res.reply }])
-				if (Array.isArray(res.kpis) && res.kpis.length) setChatProposals(prev => (Array.isArray(prev) ? [...prev, ...res.kpis] : res.kpis))
+				if (Array.isArray(res.kpis) && res.kpis.length) {
+					setChatProposals(prev => (Array.isArray(prev) ? [...prev, ...res.kpis] : res.kpis))
+				} else {
+					try { await api.prepare(selectedTables, 5) } catch {}
+					try {
+						const more = await api.generateKpis(selectedTables, 5, true)
+						setChatProposals(prev => (Array.isArray(prev) ? [...prev, ...more] : more))
+					} catch {}
+				}
 			} catch {}
 		}
 	}
@@ -183,6 +191,12 @@ export default function KPIDraft() {
 			setChatHistory(prev => [...prev, { role: 'assistant', content: res.reply }])
 			if (Array.isArray(res.kpis) && res.kpis.length) {
 				setChatProposals(prev => (Array.isArray(prev) ? [...prev, ...res.kpis] : res.kpis))
+			} else {
+				try { await api.prepare(selectedTables, 5) } catch {}
+				try {
+					const more = await api.generateKpis(selectedTables, 5, true)
+					setChatProposals(prev => (Array.isArray(prev) ? [...prev, ...more] : more))
+				} catch {}
 			}
 		} catch (e: any) {
 			setChatHistory(prev => [...prev, { role: 'assistant', content: `Sorry, I hit an error: ${String(e?.response?.data?.detail || e?.message || e)}` }])
