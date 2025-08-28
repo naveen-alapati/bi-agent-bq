@@ -637,7 +637,7 @@ def cxo_send(payload: Dict[str, Any]):
 					"sql": (k.get('sql') or '')[:4000],
 					"vega_lite_spec": k.get('vega_lite_spec'),
 					"row_count": len(rows),
-					"rows": rows[:150],
+					"rows": rows,
 				}
 				kpis_with_data.append(item)
 		if not kpis_with_data:

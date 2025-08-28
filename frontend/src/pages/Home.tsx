@@ -313,7 +313,7 @@ export default function Home() {
       filter_date_column: k.filter_date_column,
       sql: typeof k.sql === 'string' ? (k.sql.length > 4000 ? k.sql.slice(0, 4000) : k.sql) : '',
       layout: layoutMap[k.id] || null,
-      rows: includeRows ? ((rowsByKpi[k.id] || []).slice(0, 200)) : []
+      rows: includeRows ? (rowsByKpi[k.id] || []) : []
     }))
     return {
       dashboard_name: active.name,
