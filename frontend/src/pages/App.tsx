@@ -1017,30 +1017,12 @@ export default function App() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9999 }} onClick={() => setLineageOpen(false)}>
           <div 
             style={{ 
-              position: 'absolute',
-              left: '50%',
-              top: '50%',
-              transform: 'translate(-50%, -50%)',
-              width: 'min(820px, 92vw)', 
-              height: 'min(70vh, 85vh)', 
-              background: 'var(--card)', 
-              border: '1px solid var(--border)', 
-              borderRadius: 12, 
-              display: 'flex', 
-              flexDirection: 'column',
-              boxShadow: 'var(--shadow)'
+              position: 'absolute', left: '50%', top: '50%', width: '90%', height: '90%', transform: 'translate(-50%, -50%)',
+              background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow)', resize: 'both', overflow: 'hidden'
             }}
             onClick={e => e.stopPropagation()}
           >
-            <div 
-              style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'space-between', 
-                padding: 12, 
-                borderBottom: '1px solid var(--border)'
-              }}
-            >
+            <div className="card-header" style={{ padding: 12 }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
                 <div className="card-title">KPI Lineage</div>
                 {lineageKpi?.name && <div className="card-subtitle">{lineageKpi.name}</div>}
