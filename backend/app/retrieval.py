@@ -90,7 +90,6 @@ class RetrievalPlugin:
 					WHERE {' AND '.join(where_clauses)}
 					  AND embedding IS NOT NULL
 					  AND ARRAY_LENGTH(embedding) > 0
-					  AND VECTOR_SEARCH(embedding, @qvec, @k)
 					ORDER BY distance
 					LIMIT @k
 					"""
@@ -109,7 +108,6 @@ class RetrievalPlugin:
 					WHERE {' AND '.join(where_clauses)}
 					  AND embedding IS NOT NULL
 					  AND ARRAY_LENGTH(embedding) > 0
-					  AND VECTOR_SEARCH(embedding, q.qvec, @k)
 					ORDER BY distance
 					LIMIT @k
 					"""

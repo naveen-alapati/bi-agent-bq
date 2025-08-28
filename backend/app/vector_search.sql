@@ -5,6 +5,6 @@ SELECT
   te.*,
   VECTOR_DISTANCE(te.embedding, @query_embedding) AS dist
 FROM `PROJECT_ID.analytics_poc.table_embeddings` AS te
-WHERE VECTOR_SEARCH(te.embedding, @query_embedding, 25)
+-- In modern BigQuery, prefer ordering by distance rather than VECTOR_SEARCH predicate
 ORDER BY dist
 LIMIT 25;

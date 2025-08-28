@@ -255,7 +255,6 @@ class BigQueryService:
                VECTOR_DISTANCE(te.embedding, q.query_embedding) AS dist
         FROM `{table_fqn}` AS te, q
         WHERE te.dataset_id=@ds AND te.table_id=@tb
-          AND VECTOR_SEARCH(te.embedding, q.query_embedding, @k)
         ORDER BY dist
         LIMIT @k
         """
@@ -281,7 +280,6 @@ class BigQueryService:
                VECTOR_DISTANCE(te.embedding, @qvec) AS dist
         FROM `{table_fqn}` AS te
         WHERE te.dataset_id=@ds AND te.table_id=@tb
-          AND VECTOR_SEARCH(te.embedding, @qvec, @k)
         ORDER BY dist
         LIMIT @k
         """
