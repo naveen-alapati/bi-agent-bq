@@ -12,7 +12,7 @@ import { TopBar } from '../ui/TopBar'
 import { KPICatalog } from '../ui/KPICatalog'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { computeKpiLineage, Lineage } from '../utils/lineage'
+import { LineageGraph } from '../ui/LineageGraph'
 
 export default function App() {
   const params = useParams()
@@ -65,7 +65,9 @@ export default function App() {
   const [chartErrorsByKpi, setChartErrorsByKpi] = useState<Record<string, any>>({})
   const [lineageOpen, setLineageOpen] = useState(false)
   const [lineageKpi, setLineageKpi] = useState<any>(null)
-  const [lineageData, setLineageData] = useState<Lineage | null>(null)
+  const [lineageData, setLineageData] = useState<any | null>(null)
+  const [lineageLoading, setLineageLoading] = useState(false)
+  const [lineageError, setLineageError] = useState<string | null>(null)
   const [retrievalAssist, setRetrievalAssist] = useState<boolean>(() => {
     try { return JSON.parse(localStorage.getItem('retrievalAssist') || 'false') } catch { return false }
   })
@@ -438,16 +440,19 @@ export default function App() {
     setAiModalPosition({ x: centerX, y: centerY })
   }
 
-  function openLineage(k: any) {
+  async function openLineage(k: any) {
     try {
-      const lin = computeKpiLineage(k.sql, k)
-      setLineageKpi(k)
-      setLineageData(lin)
       setLineageOpen(true)
-    } catch (e) {
       setLineageKpi(k)
-      setLineageData({ sources: [], joins: [] })
-      setLineageOpen(true)
+      setLineageLoading(true)
+      setLineageError(null)
+      const res = await api.getLineage(k.sql)
+      setLineageData(res)
+    } catch (e: any) {
+      setLineageError(String(e?.response?.data?.detail?.message || e?.message || e))
+      setLineageData({ sources: [], joins: [], graph: { nodes: [], edges: [] } })
+    } finally {
+      setLineageLoading(false)
     }
   }
 
@@ -916,7 +921,7 @@ export default function App() {
                     <button className="btn btn-sm" onClick={() => runKpi(k)}>Test</button>
                     <button className="btn btn-sm" onClick={() => { setSqlTitle(k.name ? `SQL – ${k.name}` : 'SQL Query'); setSqlContent(k.sql || ''); setSqlOpen(true) }}>View SQL</button>
                     <button className="btn btn-sm" onClick={() => openAiEdit(k)}>AI Edit</button>
-                    <button className="btn btn-sm" onClick={() => openLineage(k)}>KPI Lineage</button>
+                    <button className="btn btn-sm" onClick={() => openLineage(k)}>Lineage</button>
                     <button className="btn btn-sm" onClick={async () => {
                       const r = await fetch('/api/export/card', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql: k.sql }) }); const blob = await r.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${k.name||'card'}.csv`; a.click(); URL.revokeObjectURL(url)
                     }}>Export</button>
@@ -1044,62 +1049,78 @@ export default function App() {
                 <button className="btn btn-sm" onClick={() => setLineageOpen(false)}>✕</button>
               </div>
             </div>
-            <div style={{ padding: 12, overflow: 'auto', display: 'grid', gap: 12 }}>
-              <div className="panel">
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12, padding: 12, height: 'calc(100% - 56px)' }}>
+              <div className="panel" style={{ height: '100%', padding: 0, overflow: 'hidden' }}>
+                {lineageLoading ? (
+                  <div style={{ padding: 16 }}>Loading lineage…</div>
+                ) : lineageError ? (
+                  <div style={{ padding: 16, color: 'var(--danger)' }}>Failed to load lineage: {lineageError}</div>
+                ) : (
+                  <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                    <LineageGraph graph={((lineageData && lineageData.nodes && lineageData.edges) ? { nodes: lineageData.nodes, edges: lineageData.edges } : (lineageData && lineageData.graph) || { nodes: [], edges: [] })} joins={(lineageData && lineageData.joins) || []} outputs={(lineageData && lineageData.outputs) || undefined} />
+                  </div>
+                )}
+              </div>
+              <div className="panel" style={{ height: '100%', overflow: 'auto' }}>
                 <div className="section-title">Overview</div>
                 <div className="card-subtitle">ID: {lineageKpi?.id}</div>
                 <div className="card-subtitle">Schema: {lineageKpi?.expected_schema}</div>
                 <div className="card-subtitle">Chart: {lineageKpi?.chart_type}</div>
                 {lineageKpi?.filter_date_column && <div className="card-subtitle">Filter Date Column: {lineageKpi.filter_date_column}</div>}
-              </div>
-              <div className="panel">
-                <div className="section-title">Sources</div>
+                {lineageData?.nodes && (
+                  <div className="card-subtitle">KPI Owner: {(lineageData.nodes.find((n: any) => n.type === 'kpi')?.owner) || 'Naveen Alapati'}</div>
+                )}
+
+                <div className="section-title" style={{ marginTop: 12 }}>Sources</div>
                 <div className="scroll">
                   {(lineageData?.sources || []).length ? (
-                    (lineageData?.sources || []).map(s => (
+                    (lineageData?.sources || []).map((s: string) => (
                       <div key={s} className="list-item"><span style={{ flex: 1 }}>{s}</span></div>
                     ))
                   ) : (
-                    <div className="card-subtitle">No sources detected.</div>
+                    <div className="card-subtitle">No sources detected</div>
                   )}
                 </div>
-              </div>
-              <div className="panel">
-                <div className="section-title">Joins</div>
+
+                <div className="section-title" style={{ marginTop: 12 }}>Joins</div>
                 <div className="scroll">
                   {(lineageData?.joins || []).length ? (
-                    (lineageData?.joins || []).map((j, idx) => (
+                    (lineageData?.joins || []).map((j: any, idx: number) => (
                       <div key={idx} className="list-item">
-                        <span style={{ flex: 1 }}>{j.left} = {j.right}</span>
-                        <span className="card-subtitle" style={{ fontSize: 11, opacity: 0.8 }}>{j.on}</span>
+                        <div className="card-subtitle">{j.type || 'JOIN'}: {j.left_table || j.left} ↔ {j.right_table || j.right}</div>
+                        {j.on && <div style={{ fontSize: 12, color: 'var(--muted)' }}>ON {j.on}</div>}
+                        {(j.pairs || []).length > 0 && (
+                          <div style={{ fontSize: 12 }}>
+                            {(j.pairs || []).map((p: any, i: number) => (
+                              <div key={i}>{p.left} = {p.right}</div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))
                   ) : (
-                    <div className="card-subtitle">No joins detected.</div>
+                    <div className="card-subtitle">No joins found</div>
                   )}
                 </div>
-              </div>
-              <div className="panel">
-                <div className="section-title">Filters</div>
+
+                <div className="section-title" style={{ marginTop: 12 }}>Filters</div>
                 {(lineageData?.filters || []).length ? (
-                  (lineageData?.filters || []).map((f, idx) => (
+                  (lineageData?.filters || []).map((f: string, idx: number) => (
                     <div key={idx} className="list-item"><span style={{ flex: 1 }}>{f}</span></div>
                   ))
                 ) : (
-                  <div className="card-subtitle">No filters detected.</div>
+                  <div className="card-subtitle">No filters</div>
                 )}
-              </div>
-              <div className="panel">
-                <div className="section-title">Group By / Outputs</div>
+
+                <div className="section-title" style={{ marginTop: 12 }}>Group By / Outputs</div>
                 {lineageData?.groupBy && lineageData.groupBy.length > 0 && (
                   <div className="card-subtitle">Group By: {lineageData.groupBy.join(', ')}</div>
                 )}
                 {lineageData?.outputs && (
                   <div className="card-subtitle">Outputs: {Object.entries(lineageData.outputs).filter(([,v]) => Boolean(v)).map(([k,v]) => `${k}: ${(v as string).replace(/\s+/g,' ')}`).join(' | ')}</div>
                 )}
-              </div>
-              <div className="panel">
-                <div className="section-title">Raw JSON</div>
+
+                <div className="section-title" style={{ marginTop: 12 }}>Raw JSON</div>
                 <div className="toolbar" style={{ marginBottom: 8 }}>
                   <button className="btn btn-sm" onClick={() => { try { navigator.clipboard.writeText(JSON.stringify(lineageData, null, 2)) } catch {} }}>Copy JSON</button>
                 </div>

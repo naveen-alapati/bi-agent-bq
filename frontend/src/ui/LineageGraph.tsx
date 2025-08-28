@@ -192,7 +192,7 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
         if (t === 'measure') return '#fb923c'
         return '#999'
       })
-      .attr('stroke-width', 1.2)
+      .attr('stroke-width', 2.4)
       .attr('stroke-linecap', 'round')
 
     link.append('title').text((d: any) => `${d.source?.label || d.source?.id} → ${d.target?.label || d.target?.id}`)
