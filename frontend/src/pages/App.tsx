@@ -13,6 +13,7 @@ import { KPICatalog } from '../ui/KPICatalog'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { LineageGraph } from '../ui/LineageGraph'
+import { ThoughtGraphPicker } from '../ui/ThoughtGraphPicker'
 
 export default function App() {
   const params = useParams()
@@ -726,6 +727,14 @@ export default function App() {
                     {datasets.filter(ds => !ds.isBackendCreated).length} of {datasets.length} datasets available
                   </div>
                   <TableSelector datasets={datasets} onChange={setSelected} />
+                  {/* Thought Graph actions */}
+                  <div className="toolbar" style={{ marginTop: 8, gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button className="btn" disabled={!selected.length} onClick={() => {
+                      try { sessionStorage.setItem('thoughtGraph', JSON.stringify({ selectedTables: selected })) } catch {}
+                      navigate('/thought-graph', { state: { selectedTables: selected } })
+                    }}>Generate Thought Graph</button>
+                    <ThoughtGraphPicker selected={selected} />
+                  </div>
                 </>
               )}
               <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>

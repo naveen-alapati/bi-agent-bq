@@ -30,8 +30,11 @@ export const api = {
     const r = await axios.post('/api/prepare', { tables, sampleRows })
     return r.data
   },
-  async generateKpis(tables: {datasetId: string, tableId: string}[], k = 5, prefer_cross: boolean = false) {
-    const r = await axios.post('/api/generate_kpis', { tables, k, prefer_cross })
+  async generateKpis(tables: {datasetId: string, tableId: string}[], k = 5, prefer_cross: boolean = false, thought_graph_id?: string, thought_graph?: any) {
+    const payload: any = { tables, k, prefer_cross }
+    if (thought_graph_id) payload.thought_graph_id = thought_graph_id
+    if (thought_graph) payload.thought_graph = thought_graph
+    const r = await axios.post('/api/generate_kpis', payload)
     return r.data.kpis
   },
   async runKpi(sql: string, filters?: any, date_column?: string, expected_schema?: string, opts?: { preview_limit?: number, validate_shape?: boolean }) {
@@ -105,5 +108,23 @@ export const api = {
   async getLineage(sql: string, dialect: 'bigquery' = 'bigquery') {
     const r = await axios.post('/api/lineage', { sql, dialect })
     return r.data as any
+  },
+
+  // Thought Graphs
+  async listThoughtGraphs(datasetId?: string) {
+    const r = await axios.get('/api/thought_graphs', { params: datasetId ? { datasetId } : undefined })
+    return r.data.graphs as { id: string; name: string; version?: string; primary_dataset_id?: string }[]
+  },
+  async getThoughtGraph(id: string) {
+    const r = await axios.get(`/api/thought_graphs/${encodeURIComponent(id)}`)
+    return r.data as { id: string; name: string; version?: string; primary_dataset_id?: string; selected_tables: {datasetId:string, tableId:string}[]; graph: any }
+  },
+  async saveThoughtGraph(payload: { id?: string; name: string; primary_dataset_id?: string; datasets?: string[]; selected_tables: {datasetId:string, tableId:string}[]; graph: any }) {
+    const r = await axios.post('/api/thought_graphs', payload)
+    return r.data as { id: string; name: string; version: string }
+  },
+  async generateThoughtGraph(tables: {datasetId: string, tableId: string}[], name?: string, prompt?: string, datasets?: string[]) {
+    const r = await axios.post('/api/thought_graph/generate', { tables, name, prompt, datasets })
+    return r.data as { graph: any; name: string }
   }
 }

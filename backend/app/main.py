@@ -37,6 +37,13 @@ from .models import (
 	KPICatalogListResponse,
 	AnalystChatRequest,
 	AnalystChatResponse,
+	ThoughtGraphSaveRequest,
+	ThoughtGraphSaveResponse,
+	ThoughtGraphListResponse,
+	ThoughtGraphListItem,
+	ThoughtGraphGetResponse,
+	ThoughtGraphGenerateRequest,
+	ThoughtGraphGenerateResponse,
 )
 from .diagnostics import run_self_test
 from .llm import LLMClient
@@ -52,6 +59,7 @@ EMBEDDING_MODE = os.getenv("EMBEDDING_MODE", "bigquery")
 CREATE_INDEX_THRESHOLD = int(os.getenv("CREATE_INDEX_THRESHOLD", "5000"))
 DASH_DATASET = os.getenv("DASHBOARDS_DATASET", "analytics_dash")
 RETRIEVAL_TABLE = os.getenv("RETRIEVAL_TABLE", "ai_edit_library")
+THOUGHT_DATASET = os.getenv("THOUGHT_GRAPHS_DATASET", "analytics_thought")
 
 app = FastAPI(title="Analytics KPI POC")
 
@@ -210,7 +218,15 @@ def prepare(req: PrepareRequest):
 def generate_kpis(req: GenerateKpisRequest):
 	try:
 		k = req.k or 5
-		kpis = kpi_service.generate_kpis(req.tables, k=k, prefer_cross=bool(getattr(req, 'prefer_cross', False)))
+		# Optionally enrich with thought graph context
+		thought_graph = getattr(req, 'thought_graph', None)
+		if not thought_graph and getattr(req, 'thought_graph_id', None):
+			try:
+				g = bq_service.get_thought_graph(req.thought_graph_id, dataset_id=THOUGHT_DATASET)
+				thought_graph = g.get('graph') if g else None
+			except Exception:
+				thought_graph = None
+		kpis = kpi_service.generate_kpis(req.tables, k=k, prefer_cross=bool(getattr(req, 'prefer_cross', False)), thought_graph=thought_graph)
 		return {"kpis": kpis}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
@@ -869,6 +885,108 @@ def lineage(payload: Dict[str, Any]):
 		raise
 	except Exception as exc:
 		raise HTTPException(status_code=400, detail={"type": exc.__class__.__name__, "message": str(exc)})
+
+# ===== Thought Graph APIs =====
+@app.get("/api/thought_graphs", response_model=ThoughtGraphListResponse)
+def thought_graphs_list(datasetId: Optional[str] = None):
+	try:
+		rows = bq_service.list_thought_graphs(dataset_id=THOUGHT_DATASET, dataset_filter=datasetId)
+		items = [ThoughtGraphListItem(**r) for r in rows]
+		return {"graphs": items}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/thought_graphs/{graph_id}", response_model=ThoughtGraphGetResponse)
+def thought_graphs_get(graph_id: str):
+	try:
+		row = bq_service.get_thought_graph(graph_id, dataset_id=THOUGHT_DATASET)
+		if not row:
+			raise HTTPException(status_code=404, detail="Not Found")
+		# Coerce selected_tables into TableRef list
+		selected = []
+		for t in (row.get("selected_tables") or []):
+			try:
+				selected.append(TableRef(datasetId=t.get('datasetId'), tableId=t.get('tableId')))
+			except Exception:
+				continue
+		return {
+			"id": row.get("id"),
+			"name": row.get("name"),
+			"version": row.get("version"),
+			"primary_dataset_id": row.get("primary_dataset_id"),
+			"datasets": row.get("datasets"),
+			"selected_tables": selected,
+			"graph": row.get("graph"),
+			"created_at": row.get("created_at"),
+			"updated_at": row.get("updated_at"),
+		}
+	except HTTPException:
+		raise
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/thought_graphs", response_model=ThoughtGraphSaveResponse)
+def thought_graphs_save(req: ThoughtGraphSaveRequest):
+	try:
+		gid, ver = bq_service.save_thought_graph(
+			name=req.name,
+			selected_tables=[t.model_dump() if hasattr(t, 'model_dump') else dict(t) for t in req.selected_tables],
+			graph=req.graph,
+			datasets=req.datasets or [],
+			primary_dataset_id=req.primary_dataset_id,
+			version=None,
+			graph_id=req.id,
+			dataset_id=THOUGHT_DATASET,
+		)
+		return {"id": gid, "name": req.name, "version": ver}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/thought_graph/generate", response_model=ThoughtGraphGenerateResponse)
+def thought_graphs_generate(req: ThoughtGraphGenerateRequest):
+	"""
+	Generate an initial Thought Graph from selected tables using LLM. Returns graph JSON usable by UI.
+	"""
+	try:
+		# Build a minimal input context from tables (schemas and sample rows) like KPIService
+		try:
+			context_json = kpi_service._build_input_json(req.tables)
+		except Exception:
+			context_json = "{}"
+		sys = (
+			"You are a data architect generating a Thought Graph (tables, joins, and outputs) from input tables. "
+			"Return JSON with keys: graph:{nodes:[{id,type,label?}], edges:[{source,target,type}]}, "
+			"joins:[{left_table,right_table,on?,type?,pairs:[{left,right}]}]. "
+			"Use exact fully-qualified table ids as nodes of type 'table'. Include dataset nodes optionally."
+		)
+		user = json.dumps({
+			"tables": json.loads(context_json),
+			"prompt": req.prompt or "",
+		})
+		resp = llm_client.generate_json(sys, user)
+		graph = {}
+		if isinstance(resp, dict):
+			graph = {
+				"graph": {
+					"nodes": resp.get("nodes") or (resp.get("graph", {}).get("nodes") if isinstance(resp.get("graph"), dict) else []),
+					"edges": resp.get("edges") or (resp.get("graph", {}).get("edges") if isinstance(resp.get("graph"), dict) else []),
+				},
+				"joins": resp.get("joins") or [],
+			}
+		# Fallback minimal graph of tables only
+		if not graph.get("graph", {}).get("nodes"):
+			nodes = []
+			for t in req.tables:
+				fq = f"{kpi_service.project_id}.{t.datasetId}.{t.tableId}"
+				nodes.append({"id": fq, "type": "table", "label": t.tableId})
+			graph = {"graph": {"nodes": nodes, "edges": []}, "joins": []}
+		name = req.name or (req.tables[0].tableId if req.tables else "Thought Graph")
+		return {"graph": graph, "name": name}
+	except Exception as exc:
+		raise HTTPException(status_code=500, detail=str(exc))
 
 # Serve built SPA (Dockerfile copies frontend/dist to /app/static)
 static_dir = os.path.abspath(os.getenv("STATIC_DIR", "/app/static"))
