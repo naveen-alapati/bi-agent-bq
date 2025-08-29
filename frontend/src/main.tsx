@@ -4,12 +4,14 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import App from './pages/App'
 import Home from './pages/Home'
 import KPIDraft from './pages/KPIDraft'
+import ThoughtGraphPage from './pages/ThoughtGraph'
 
 const router = createBrowserRouter([
   { path: '/', element: <Home /> },
   { path: '/editor', element: <App /> },
   { path: '/editor/:id', element: <App /> },
   { path: '/kpi-draft', element: <KPIDraft /> },
+  { path: '/thought-graph', element: <ThoughtGraphPage /> },
 ])
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

@@ -864,6 +864,164 @@ class BigQueryService:
             out.append(row)
         return out
 
+    # ===== Thought Graphs Storage =====
+    def ensure_thought_graphs_table(self, dataset_id: str = "analytics_thought", table: str = "thought_graphs") -> str:
+        self.ensure_dataset(dataset_id)
+        table_fqn = f"{self.project_id}.{dataset_id}.{table}"
+        try:
+            self.client.get_table(table_fqn)
+        except NotFound:
+            schema = [
+                bigquery.SchemaField("id", "STRING"),
+                bigquery.SchemaField("name", "STRING"),
+                bigquery.SchemaField("version", "STRING"),
+                bigquery.SchemaField("primary_dataset_id", "STRING"),
+                bigquery.SchemaField("datasets", "STRING", mode="REPEATED"),
+                bigquery.SchemaField("selected_tables", "STRING"),
+                bigquery.SchemaField("graph_json", "STRING"),
+                bigquery.SchemaField("created_at", "TIMESTAMP"),
+                bigquery.SchemaField("updated_at", "TIMESTAMP"),
+            ]
+            table_obj = bigquery.Table(table_fqn, schema=schema)
+            self.client.create_table(table_obj)
+        return table_fqn
+
+    def save_thought_graph(
+        self,
+        name: str,
+        selected_tables: List[Dict[str, Any]],
+        graph: Dict[str, Any],
+        datasets: Optional[List[str]] = None,
+        primary_dataset_id: Optional[str] = None,
+        version: Optional[str] = None,
+        graph_id: Optional[str] = None,
+        dataset_id: str = "analytics_thought",
+    ) -> Tuple[str, str]:
+        table = self.ensure_thought_graphs_table(dataset_id)
+        now = datetime.now(timezone.utc)
+        # Determine existing and next version
+        existing = None
+        if graph_id:
+            try:
+                rows = list(
+                    self.client.query(
+                        f"SELECT version FROM `{table}` WHERE id=@id ORDER BY updated_at DESC LIMIT 1",
+                        job_config=bigquery.QueryJobConfig(
+                            query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", graph_id)]
+                        ),
+                        location=self.location,
+                    )
+                )
+                if rows:
+                    existing = dict(rows[0])
+            except Exception:
+                existing = None
+
+        # Generate new id if not provided
+        gid = graph_id or uuid.uuid4().hex
+        # Determine version - always create new version when updating existing id
+        if graph_id and existing:
+            try:
+                latest = existing.get("version")
+                ver = self._next_patch(latest)
+            except Exception:
+                ver = "1.0.0"
+        else:
+            ver = "1.0.0"
+
+        row = {
+            "id": gid,
+            "name": name,
+            "version": ver,
+            "primary_dataset_id": primary_dataset_id or (datasets[0] if datasets else None),
+            "datasets": datasets or [],
+            "selected_tables": json.dumps(selected_tables or []),
+            "graph_json": json.dumps(graph or {}),
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+        errors = self.client.insert_rows_json(table, [row])
+        if errors:
+            raise RuntimeError(f"Failed to save thought graph: {errors}")
+        return gid, ver
+
+    def list_thought_graphs(self, dataset_id: str = "analytics_thought", dataset_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+        table = self.ensure_thought_graphs_table(dataset_id)
+        sql = f"""
+        WITH Latest AS (
+            SELECT id, name, version, primary_dataset_id, datasets, CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at,
+                   ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) AS rn
+            FROM `{table}`
+        )
+        SELECT id, name, version, primary_dataset_id, datasets, created_at, updated_at
+        FROM Latest
+        WHERE rn = 1
+        { 'AND primary_dataset_id = @ds' if dataset_filter else '' }
+        ORDER BY created_at DESC
+        """
+        params = []
+        if dataset_filter:
+            params.append(bigquery.ScalarQueryParameter("ds", "STRING", dataset_filter))
+        rows = self.client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=params), location=self.location)
+        out = []
+        for r in rows:
+            row = dict(r)
+            # datasets already list type; coerce to list[str]
+            try:
+                ds_list = list(row.get("datasets") or [])
+            except Exception:
+                ds_list = []
+            out.append({
+                "id": row.get("id"),
+                "name": row.get("name"),
+                "version": row.get("version"),
+                "primary_dataset_id": row.get("primary_dataset_id"),
+                "datasets": ds_list,
+                "created_at": row.get("created_at"),
+                "updated_at": row.get("updated_at"),
+            })
+        return out
+
+    def get_thought_graph(self, thought_graph_id: str, dataset_id: str = "analytics_thought") -> Optional[Dict[str, Any]]:
+        table = self.ensure_thought_graphs_table(dataset_id)
+        sql = f"""
+        SELECT id, name, version, primary_dataset_id, datasets, selected_tables, graph_json,
+               CAST(created_at AS STRING) AS created_at, CAST(updated_at AS STRING) AS updated_at
+        FROM `{table}`
+        WHERE id=@id
+        ORDER BY updated_at DESC
+        LIMIT 1
+        """
+        job = self.client.query(
+            sql,
+            job_config=bigquery.QueryJobConfig(query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", thought_graph_id)]),
+            location=self.location,
+        )
+        rows = list(job)
+        if not rows:
+            return None
+        row = dict(rows[0])
+        def parse_json(val: Any) -> Any:
+            try:
+                return json.loads(val)
+            except Exception:
+                return val
+        try:
+            ds_list = list(row.get("datasets") or [])
+        except Exception:
+            ds_list = []
+        return {
+            "id": row.get("id"),
+            "name": row.get("name"),
+            "version": row.get("version"),
+            "primary_dataset_id": row.get("primary_dataset_id"),
+            "datasets": ds_list,
+            "selected_tables": parse_json(row.get("selected_tables")),
+            "graph": parse_json(row.get("graph_json")),
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
+
     def ensure_cxo_tables(self, dataset_id: str = "analytics_cxo") -> Tuple[str, str]:
         self.ensure_dataset(dataset_id)
         conv_fqn = f"{self.project_id}.{dataset_id}.cxo_conversations"

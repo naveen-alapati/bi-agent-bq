@@ -170,7 +170,7 @@ class KPIService:
             prepared.append(PreparedTable(datasetId=t.datasetId, tableId=t.tableId, embed_rows=inserted))
         return prepared
 
-    def _build_input_json(self, tables: List[TableRef]) -> str:
+    def _build_input_json(self, tables: List[TableRef], thought_graph: Any = None) -> str:
         infos: List[Dict[str, Any]] = []
         for t in tables:
             try:
@@ -196,7 +196,13 @@ class KPIService:
                     "notes": "",
                 }
             )
-        return json.dumps({"tables": infos})
+        payload: Dict[str, Any] = {"tables": infos}
+        if thought_graph is not None:
+            try:
+                payload["thought_graph"] = thought_graph
+            except Exception:
+                pass
+        return json.dumps(payload)
 
     def _fallback_kpis_for_table(self, dataset_id: str, table_id: str, k: int) -> List[KPIItem]:
         # Deprecated for prod; kept behind flag for debugging
@@ -338,7 +344,7 @@ class KPIService:
         except Exception:
             return {}
 
-    def generate_kpis(self, tables: List[TableRef], k: int = 5, prefer_cross: bool = False) -> List[KPIItem]:
+    def generate_kpis(self, tables: List[TableRef], k: int = 5, prefer_cross: bool = False, thought_graph: Any = None) -> List[KPIItem]:
         table_items: List[KPIItem] = []
         cross_items: List[KPIItem] = []
         # Per-table KPIs (existing behavior, with lower budget when preferring cross)
@@ -349,7 +355,7 @@ class KPIService:
         for t in tables:
             try:
                 system_prompt = SYSTEM_PROMPT_TEMPLATE.format(k=k_per_table)
-                user_prompt = self._build_input_json([t])
+                user_prompt = self._build_input_json([t], thought_graph=thought_graph)
                 result = self._coerce_llm_result(self.llm.generate_json(system_prompt, user_prompt))
             except Exception as exc:
                 if self.kpi_fallback_enabled:
@@ -394,7 +400,7 @@ class KPIService:
                 primary = self._select_primary_table(tables)
                 primary_slug = f"{primary.datasetId}.{primary.tableId}"
                 system_prompt = CROSS_SYSTEM_PROMPT_TEMPLATE.format(k=max(1, min(k, 7)))
-                user_prompt = self._build_input_json(tables)
+                user_prompt = self._build_input_json(tables, thought_graph=thought_graph)
                 cross_result = self._coerce_llm_result(self.llm.generate_json(system_prompt, user_prompt))
                 # Attempt to infer date column from primary; default to 'x' for timeseries
                 primary_date_col = self._infer_date_col_from_schema(primary.datasetId, primary.tableId)

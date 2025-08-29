@@ -49,6 +49,8 @@ class GenerateKpisRequest(BaseModel):
 	tables: List[TableRef]
 	k: Optional[int] = 5
 	prefer_cross: Optional[bool] = False
+	thought_graph_id: Optional[str] = None
+	thought_graph: Optional[Dict[str, Any]] = None
 
 
 class KPIItem(BaseModel):
@@ -182,3 +184,88 @@ class AnalystChatRequest(BaseModel):
 class AnalystChatResponse(BaseModel):
 	reply: str
 	kpis: Optional[List[KPIItem]] = None
+
+
+# Thought Graphs
+class ThoughtGraphNode(BaseModel):
+	id: str
+	type: str
+	label: Optional[str] = None
+
+
+class ThoughtGraphEdge(BaseModel):
+	source: str
+	target: str
+	type: str
+
+
+class ThoughtGraphJoinPair(BaseModel):
+	left: str
+	right: str
+
+
+class ThoughtGraphJoin(BaseModel):
+	id: Optional[str] = None
+	left_table: Optional[str] = None
+	right_table: Optional[str] = None
+	type: Optional[str] = None
+	on: Optional[str] = None
+	pairs: Optional[List[ThoughtGraphJoinPair]] = None
+
+
+class ThoughtGraphPayload(BaseModel):
+	graph: Dict[str, Any]
+	joins: Optional[List[ThoughtGraphJoin]] = None
+
+
+class ThoughtGraphSaveRequest(BaseModel):
+	id: Optional[str] = None
+	name: str
+	primary_dataset_id: Optional[str] = None
+	datasets: Optional[List[str]] = None
+	selected_tables: List[TableRef]
+	graph: Dict[str, Any]
+
+
+class ThoughtGraphSaveResponse(BaseModel):
+	id: str
+	name: str
+	version: str
+
+
+class ThoughtGraphListItem(BaseModel):
+	id: str
+	name: str
+	version: Optional[str] = None
+	primary_dataset_id: Optional[str] = None
+	datasets: Optional[List[str]] = None
+	created_at: Optional[str] = None
+	updated_at: Optional[str] = None
+
+
+class ThoughtGraphListResponse(BaseModel):
+	graphs: List[ThoughtGraphListItem]
+
+
+class ThoughtGraphGetResponse(BaseModel):
+	id: str
+	name: str
+	version: Optional[str] = None
+	primary_dataset_id: Optional[str] = None
+	datasets: Optional[List[str]] = None
+	selected_tables: List[TableRef]
+	graph: Dict[str, Any]
+	created_at: Optional[str] = None
+	updated_at: Optional[str] = None
+
+
+class ThoughtGraphGenerateRequest(BaseModel):
+	tables: List[TableRef]
+	datasets: Optional[List[str]] = None
+	name: Optional[str] = None
+	prompt: Optional[str] = None
+
+
+class ThoughtGraphGenerateResponse(BaseModel):
+	graph: Dict[str, Any]
+	name: str
