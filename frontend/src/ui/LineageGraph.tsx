@@ -161,17 +161,30 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
       .filter(l => validId.has(l.source) && validId.has(l.target))
       .map(l => ({ source: l.source, target: l.target, value: 1, _type: l.type, _meta: l.meta }))
 
+    // Safety guards: limit graph size and wrap in try/catch to avoid runtime errors
+    const MAX_NODES = 800
+    const MAX_LINKS = 2000
+    const safeNodes = nodes.slice(0, MAX_NODES)
+    const validId2 = new Set(safeNodes.map(n => n.id))
+    const safeLinks = links.filter(l => validId2.has(l.source) && validId2.has(l.target)).slice(0, MAX_LINKS)
+
     const sankeyLayout = d3Sankey<any, any>()
       .nodeId((d: any) => d.id)
-      .nodeWidth(NODE_WIDTH)
-      .nodePadding(NODE_PADDING)
+      .nodeWidth(Math.max(2, Math.min(48, NODE_WIDTH)))
+      .nodePadding(Math.max(4, Math.min(160, NODE_PADDING)))
       .nodeAlign(sankeyJustify)
-      .extent([[MARGIN.left, MARGIN.top], [width - MARGIN.right, height - MARGIN.bottom]])
+      .extent([[MARGIN.left, MARGIN.top], [Math.max(MARGIN.left + 10, width - MARGIN.right), Math.max(MARGIN.top + 10, height - MARGIN.bottom)]])
 
-    const sankeyData = sankeyLayout({
-      nodes: nodes.map(d => ({ ...d })),
-      links: links.map(l => ({ ...l }))
-    }) as unknown as { nodes: (GraphNode & { x0: number; x1: number; y0: number; y1: number })[]; links: any[] }
+    let sankeyData: { nodes: (GraphNode & { x0: number; x1: number; y0: number; y1: number })[]; links: any[] }
+    try {
+      sankeyData = sankeyLayout({
+        nodes: safeNodes.map(d => ({ ...d })),
+        links: safeLinks.map(l => ({ ...l }))
+      }) as unknown as { nodes: (GraphNode & { x0: number; x1: number; y0: number; y1: number })[]; links: any[] }
+    } catch (err) {
+      // Fallback to empty graph on layout error
+      sankeyData = { nodes: [], links: [] } as any
+    }
 
     // Draw links thin
     const link = g.append('g')
