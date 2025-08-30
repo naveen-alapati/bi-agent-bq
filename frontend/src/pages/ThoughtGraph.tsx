@@ -83,6 +83,17 @@ export default function ThoughtGraphPage() {
 		setGraph(prev => ({ ...prev, joins: [ ...(prev.joins || []), { left_table: leftFq, right_table: rightFq, type: 'JOIN' } ] }))
 	}
 
+	// Quick-add helpers for KPI-first nodes
+	function addCalc(id: string, label: string, expression: string) {
+		setGraph(prev => ({ ...prev, graph: { nodes: [ ...(prev.graph?.nodes||[]), { id, type: 'Calc', label, props: { expression } } ], edges: prev.graph?.edges || [] } }))
+	}
+	function addPolicy(id: string, label: string, rule: string, status: 'RECOMMENDED'|'BLOCKING'|'INFO' = 'RECOMMENDED') {
+		setGraph(prev => ({ ...prev, graph: { nodes: [ ...(prev.graph?.nodes||[]), { id, type: 'Policy', label, props: { rule, status } } ], edges: prev.graph?.edges || [] } }))
+	}
+	function addKpi(id: string, label: string, section: string) {
+		setGraph(prev => ({ ...prev, graph: { nodes: [ ...(prev.graph?.nodes||[]), { id, type: 'KPI', label, props: { owner: 'Naveen Alapati', section } } ], edges: prev.graph?.edges || [] } }))
+	}
+
 	const tablesInDataset = useMemo(() => {
 		if (!datasetId) return []
 		return selectedTables.filter(t => t.datasetId === datasetId)
@@ -161,6 +172,40 @@ export default function ThoughtGraphPage() {
 							const id = (document.getElementById('__rm') as HTMLInputElement)?.value?.trim()
 							if (id) removeNode(id)
 						}}>Remove Node</button>
+						{/* Quick add KPI-first nodes */}
+						<input className="input" placeholder="Calc id" id="__calc_id" />
+						<input className="input" placeholder="Calc label" id="__calc_label" />
+						<input className="input" placeholder="Calc expression" id="__calc_expr" />
+						<button className="btn btn-sm" onClick={() => {
+							const id = (document.getElementById('__calc_id') as HTMLInputElement)?.value?.trim()
+							const lb = (document.getElementById('__calc_label') as HTMLInputElement)?.value?.trim()
+							const ex = (document.getElementById('__calc_expr') as HTMLInputElement)?.value?.trim()
+							if (id && lb && ex) addCalc(id, lb, ex)
+						}}>Add Calc</button>
+						<input className="input" placeholder="Policy id" id="__pol_id" />
+						<input className="input" placeholder="Policy label" id="__pol_label" />
+						<input className="input" placeholder="Rule" id="__pol_rule" />
+						<button className="btn btn-sm" onClick={() => {
+							const id = (document.getElementById('__pol_id') as HTMLInputElement)?.value?.trim()
+							const lb = (document.getElementById('__pol_label') as HTMLInputElement)?.value?.trim()
+							const ru = (document.getElementById('__pol_rule') as HTMLInputElement)?.value?.trim()
+							if (id && lb && ru) addPolicy(id, lb, ru)
+						}}>Add Policy</button>
+						<input className="input" placeholder="KPI id" id="__kpi_id" />
+						<input className="input" placeholder="KPI label" id="__kpi_label" />
+						<select className="select" id="__kpi_section">
+							<option value="Customer & Growth">Customer & Growth</option>
+							<option value="Profitability & Margin">Profitability & Margin</option>
+							<option value="Operational & Fulfillment">Operational & Fulfillment</option>
+							<option value="CX & Brand">CX & Brand</option>
+							<option value="Financial & Risk">Financial & Risk</option>
+						</select>
+						<button className="btn btn-sm" onClick={() => {
+							const id = (document.getElementById('__kpi_id') as HTMLInputElement)?.value?.trim()
+							const lb = (document.getElementById('__kpi_label') as HTMLInputElement)?.value?.trim()
+							const sec = (document.getElementById('__kpi_section') as HTMLSelectElement)?.value
+							if (id && lb && sec) addKpi(id, lb, sec)
+						}}>Add KPI</button>
 					</div>
 					<div className="card-subtitle" style={{ marginTop: 8 }}>Changes stay local until Publish. Use Regenerate to draft again.</div>
 				</div>

@@ -39,17 +39,26 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
 
     // Consistent color mapping by node type
     const NODE_COLORS: Record<string, string> = {
-      dataset: '#3B82F6',      // blue-500
-      database: '#1D4ED8',     // blue-700
-      schema: '#60A5FA',       // blue-400
-      table: '#239BA7',        // teal custom
-      column: '#64748B',       // slate-500
-      cte: '#06B6D4',          // cyan-500
-      aggregation: '#EC4899',  // pink-500
-      join: '#F59E0B',         // amber-500
-      output: '#8B5CF6',       // violet-500 (metric)
+      dataset: '#3B82F6',
+      database: '#1D4ED8',
+      schema: '#60A5FA',
+      table: '#239BA7',
+      column: '#64748B',
+      cte: '#06B6D4',
+      aggregation: '#EC4899',
+      join: '#F59E0B',
+      output: '#8B5CF6',
       metric: '#8B5CF6',
-      kpi: '#8B5CF6',          // same as metric/output
+      kpi: '#8B5CF6',
+      // KPI-first types
+      Column: '#64748B',
+      Dim: '#3B82F6',
+      Grain: '#8B5CF6',
+      Filter: '#10B981',
+      Join: '#F59E0B',
+      Calc: '#EC4899',
+      Policy: '#F97316',
+      KPI: '#8B5CF6',
     }
     const color = (d: GraphNode) => NODE_COLORS[d.type] || '#64748B'
 
@@ -143,11 +152,19 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
     }
 
     // Build remaining links from graph
-    const allowedEdgeTypes = new Set(['contains', 'projection', 'derives', 'dimension', 'measure', 'join_input', 'join_output'])
+    const allowedEdgeTypes = new Set([
+      'contains', 'projection', 'derives', 'dimension', 'measure', 'join_input', 'join_output',
+      // Thought Graph KPI-first edges
+      'DEPENDS_ON', 'USES_COLUMN', 'JOINS_COLUMN', 'TESTED_BY', 'MITIGATES', 'REFINES', 'FILTERS_COLUMN'
+    ])
     const rawLinks: { source: string; target: string; type: string; meta?: any }[] = []
     for (const e of graph.edges || []) {
-      if (!allowedEdgeTypes.has(e.type)) continue
-      rawLinks.push({ source: e.source, target: e.target, type: e.type })
+      const et = (e as any).type
+      if (!allowedEdgeTypes.has(et)) continue
+      const src = (e as any).source ?? (e as any).from
+      const tgt = (e as any).target ?? (e as any).to
+      if (!src || !tgt) continue
+      rawLinks.push({ source: src, target: tgt, type: et })
     }
 
     rawLinks.push(...syntheticJoinLinks)
@@ -293,7 +310,14 @@ export function LineageGraph({ graph, joins, outputs }: { graph: { nodes: GraphN
       .attr('dy', '0.35em')
       .attr('font-size', 11)
       .attr('fill', 'currentColor')
-      .text((d: any) => d.label || (d.type === 'table' ? d.id.split('.').slice(-1)[0] : d.id))
+      .text((d: any) => {
+        const base = d.label || (d.type === 'table' ? d.id.split('.').slice(-1)[0] : d.id)
+        try {
+          const section = (d.props && d.props.section) ? String(d.props.section) : ''
+          if (section && (d.type === 'KPI' || d.type === 'kpi')) return `${base} [${section}]`
+        } catch {}
+        return base
+      })
       .style('pointer-events', 'none')
 
     setTimeout(() => {
