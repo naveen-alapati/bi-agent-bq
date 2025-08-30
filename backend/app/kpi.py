@@ -199,7 +199,11 @@ class KPIService:
         payload: Dict[str, Any] = {"tables": infos}
         if thought_graph is not None:
             try:
-                payload["thought_graph"] = thought_graph
+                # Accept both wrapped graph and flat nodes/edges
+                if isinstance(thought_graph, dict) and ("nodes" in thought_graph or "edges" in thought_graph):
+                    payload["thought_graph"] = thought_graph
+                elif isinstance(thought_graph, dict) and "graph" in thought_graph:
+                    payload["thought_graph"] = thought_graph.get("graph")
             except Exception:
                 pass
         return json.dumps(payload)

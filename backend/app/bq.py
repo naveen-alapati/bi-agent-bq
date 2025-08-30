@@ -899,34 +899,22 @@ class BigQueryService:
     ) -> Tuple[str, str]:
         table = self.ensure_thought_graphs_table(dataset_id)
         now = datetime.now(timezone.utc)
-        # Determine existing and next version
-        existing = None
-        if graph_id:
-            try:
-                rows = list(
-                    self.client.query(
-                        f"SELECT version FROM `{table}` WHERE id=@id ORDER BY updated_at DESC LIMIT 1",
-                        job_config=bigquery.QueryJobConfig(
-                            query_parameters=[bigquery.ScalarQueryParameter("id", "STRING", graph_id)]
-                        ),
-                        location=self.location,
-                    )
+        # Always create a new document (new id); version increments by name
+        gid = uuid.uuid4().hex
+        # Determine latest version for the same name and increment
+        try:
+            rows = list(
+                self.client.query(
+                    f"SELECT version FROM `{table}` WHERE name=@name ORDER BY updated_at DESC LIMIT 1",
+                    job_config=bigquery.QueryJobConfig(
+                        query_parameters=[bigquery.ScalarQueryParameter("name", "STRING", name)]
+                    ),
+                    location=self.location,
                 )
-                if rows:
-                    existing = dict(rows[0])
-            except Exception:
-                existing = None
-
-        # Generate new id if not provided
-        gid = graph_id or uuid.uuid4().hex
-        # Determine version - always create new version when updating existing id
-        if graph_id and existing:
-            try:
-                latest = existing.get("version")
-                ver = self._next_patch(latest)
-            except Exception:
-                ver = "1.0.0"
-        else:
+            )
+            latest = dict(rows[0]).get("version") if rows else None
+            ver = self._next_patch(latest)
+        except Exception:
             ver = "1.0.0"
 
         row = {

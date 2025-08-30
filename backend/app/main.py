@@ -957,10 +957,12 @@ def thought_graphs_generate(req: ThoughtGraphGenerateRequest):
 		except Exception:
 			context_json = "{}"
 		sys = (
-			"You are a data architect generating a Thought Graph (tables, joins, and outputs) from input tables. "
-			"Return JSON with keys: graph:{nodes:[{id,type,label?}], edges:[{source,target,type}]}, "
-			"joins:[{left_table,right_table,on?,type?,pairs:[{left,right}]}]. "
-			"Use exact fully-qualified table ids as nodes of type 'table'. Include dataset nodes optionally."
+			"You are a data architect generating a KPI-first Thought Graph. Output JSON ONLY with this exact root shape: {\\\"nodes\\\": [...], \\\"edges\\\": [...]}. "
+			"Nodes must use ONLY these types with exact casing: Column, Dim, Grain, Filter, Join, Calc, Policy, KPI. "
+			"Edges must use ONLY these types with exact casing: DEPENDS_ON, USES_COLUMN, JOINS_COLUMN, TESTED_BY, MITIGATES, REFINES, FILTERS_COLUMN. "
+			"Edges must use keys 'from' and 'to'. Allow multiple Grain nodes. Do NOT add default hygiene or currency normalization. "
+			"Allow joins across datasets when keys align. Target 5 KPI sections (Customer & Growth; Profitability & Margin; Operational & Fulfillment; CX & Brand; Financial & Risk) and adjust to domain if needed. "
+			"Set default KPI owner to 'Naveen Alapati'. Columns must include props.qualified_name and props.name."
 		)
 		user = json.dumps({
 			"tables": json.loads(context_json),
@@ -969,20 +971,14 @@ def thought_graphs_generate(req: ThoughtGraphGenerateRequest):
 		resp = llm_client.generate_json(sys, user)
 		graph = {}
 		if isinstance(resp, dict):
-			graph = {
-				"graph": {
-					"nodes": resp.get("nodes") or (resp.get("graph", {}).get("nodes") if isinstance(resp.get("graph"), dict) else []),
-					"edges": resp.get("edges") or (resp.get("graph", {}).get("edges") if isinstance(resp.get("graph"), dict) else []),
-				},
-				"joins": resp.get("joins") or [],
-			}
-		# Fallback minimal graph of tables only
-		if not graph.get("graph", {}).get("nodes"):
+			graph = {"nodes": resp.get("nodes") or [], "edges": resp.get("edges") or []}
+		# Fallback minimal graph of key columns only
+		if not (isinstance(graph, dict) and isinstance(graph.get("nodes"), list) and graph["nodes"]):
 			nodes = []
 			for t in req.tables:
 				fq = f"{kpi_service.project_id}.{t.datasetId}.{t.tableId}"
-				nodes.append({"id": fq, "type": "table", "label": t.tableId})
-			graph = {"graph": {"nodes": nodes, "edges": []}, "joins": []}
+				nodes.append({"id": f"col_{t.tableId}_id", "type": "Column", "label": f"{t.tableId}.id", "props": {"qualified_name": fq, "name": "id"}})
+			graph = {"nodes": nodes, "edges": []}
 		name = req.name or (req.tables[0].tableId if req.tables else "Thought Graph")
 		return {"graph": graph, "name": name}
 	except Exception as exc:
