@@ -1078,7 +1078,7 @@ def thought_graphs_generate(req: ThoughtGraphGenerateRequest):
 				nodes.append({"id": kid, "type": "KPI", "label": f"{t.tableId} Count", "props": {"kpi": {"id": kid, "name": f"{t.tableId} Count", "type": "atomic", "description": f"Count of rows in {t.tableId}", "time_grain": "MONTH", "dimensions": [], "children": [], "formula": "", "sources": [{"table": f"{kpi_service.project_id}.{t.datasetId}.{t.tableId}", "roles": {"id": "id", "measure": "*", "timestamp": None, "dimension_keys": []}}], "null_policy": "treat_null_as_zero", "owners": ["analytics_team"], "version": "v1.0"}}})
 			graph = {"nodes": nodes, "edges": []}
 		name = req.name or (req.tables[0].tableId if req.tables else "Thought Graph")
-		return {"graph": graph, "name": name}
+		return {"graph": {"graph": graph, "joins": []}, "name": name}
 	except Exception as exc:
 		raise HTTPException(status_code=500, detail=str(exc))
 
