@@ -956,29 +956,127 @@ def thought_graphs_generate(req: ThoughtGraphGenerateRequest):
 			context_json = kpi_service._build_input_json(req.tables)
 		except Exception:
 			context_json = "{}"
-		sys = (
-			"You are a data architect generating a KPI-first Thought Graph. Output JSON ONLY with this exact root shape: {\\\"nodes\\\": [...], \\\"edges\\\": [...]}. "
-			"Nodes must use ONLY these types with exact casing: Column, Dim, Grain, Filter, Join, Calc, Policy, KPI. "
-			"Edges must use ONLY these types with exact casing: DEPENDS_ON, USES_COLUMN, JOINS_COLUMN, TESTED_BY, MITIGATES, REFINES, FILTERS_COLUMN. "
-			"Edges must use keys 'from' and 'to'. Allow multiple Grain nodes. Do NOT add default hygiene or currency normalization. "
-			"Allow joins across datasets when keys align. Target 5 KPI sections (Customer & Growth; Profitability & Margin; Operational & Fulfillment; CX & Brand; Financial & Risk) and adjust to domain if needed. "
-			"Set default KPI owner to 'Naveen Alapati'. Columns must include props.qualified_name and props.name."
-		)
+			sys = (
+				"Auto-Generate KPI Thought Graph\n\n"
+				"You are an AI-powered BI assistant that generates and maintains a KPI Thought Graph from business tables.\n"
+				"Your job is to:\n\n"
+				"Analyze the provided tables and their business domain.\n\n"
+				"Generate a complete KPI Thought Graph with all relevant KPIs.\n\n"
+				"Structure output in JSON node schema.\n\n"
+				"Ensure KPIs can be used for automatic SQL generation in BigQuery.\n\n"
+				"Rules for Graph Generation\n\n"
+				"Node = KPI\n\n"
+				"Only create nodes for KPIs, not raw columns.\n\n"
+				"KPIs can be atomic (direct aggregations) or composite (derived from others).\n\n"
+				"Graph Structure\n\n"
+				"Build a directed acyclic graph (DAG).\n\n"
+				"Leaf nodes (atomic KPIs): aggregations like Bookings, MRR, Invoices Amount, Billable Hours.\n\n"
+				"Higher-level nodes (composite KPIs): formulas like Net New ARR, Win Rate, Gross Margin.\n\n"
+				"KPI Node Schema\n"
+				"Each KPI must strictly follow this structure:\n\n"
+				"id: kpi_identifier\n"
+				"name: Human Friendly KPI Name\n"
+				"type: atomic | composite | ratio | window\n"
+				"description: Business definition of KPI\n"
+				"time_grain: DAY | WEEK | MONTH | QUARTER | YEAR\n"
+				"dimensions: [list of dimension keys]\n"
+				"children: [dependent KPI IDs if composite]\n"
+				"formula: Expression using children\n"
+				"sources:\n"
+				"  - table: table_name\n"
+				"    roles:\n"
+				"      id: primary_key\n"
+				"      measure: numeric_column\n"
+				"      timestamp: date_column\n"
+				"      dimension_keys: [dimension_columns]\n"
+				"filters: [optional default WHERE clause]\n"
+				"null_policy: treat_null_as_zero | strict_nulls\n"
+				"currency_policy: if applicable\n"
+				"tests:\n"
+				"  - type: sanity_range | row_count_nonzero\n"
+				"owners: [responsible_team]\n"
+				"version: v1.0\n\n"
+				"SQL Generation Guidance\n\n"
+				"SQL dialect = BigQuery Standard SQL.\n\n"
+				"Always generate atomic KPIs as CTEs, composites reference them.\n\n"
+				"Use DATE_TRUNC for time-grain, COALESCE for nulls, SAFE_DIVIDE for ratios.\n\n"
+				"System Task\n\n"
+				"When given:\n\n"
+				"A set of tables (with sample columns + business context).\n\n"
+				"You must:\n\n"
+				"Identify all relevant KPIs for those tables.\n\n"
+				"Build the full KPI Thought Graph (atomic + composite).\n\n"
+				"Return the output as a JSON graph definition with keys 'nodes' (array of KPI nodes following the schema) and 'edges' (array of dependencies with keys from and to using KPI IDs; use type 'DEPENDS_ON').\n\n"
+				"Optionally, provide example SQLs for 2–3 KPIs to show how queries are generated under key 'examples' (array of {id, sql})."
+			)
 		user = json.dumps({
 			"tables": json.loads(context_json),
 			"prompt": req.prompt or "",
 		})
 		resp = llm_client.generate_json(sys, user)
-		graph = {}
-		if isinstance(resp, dict):
-			graph = {"nodes": resp.get("nodes") or [], "edges": resp.get("edges") or []}
+			graph = {}
+			if isinstance(resp, dict):
+				# Accept flexible outputs and normalize to { nodes, edges }
+				raw_nodes = None
+				try:
+					if isinstance(resp.get("nodes"), list):
+						raw_nodes = resp.get("nodes")
+					elif isinstance(resp.get("kpis"), list):
+						raw_nodes = resp.get("kpis")
+					elif isinstance(resp.get("graph"), dict) and isinstance(resp.get("graph", {}).get("nodes"), list):
+						raw_nodes = resp.get("graph", {}).get("nodes")
+				except Exception:
+					raw_nodes = None
+				nodes = []
+				edges = []
+				# Transform KPI nodes into visualization nodes
+				if isinstance(raw_nodes, list):
+					for k in raw_nodes:
+						try:
+							kid = None
+							kname = None
+							if isinstance(k, dict):
+								kid = k.get("id")
+								kname = (k.get("name") or k.get("label") or kid)
+							if not kid:
+								continue
+							nodes.append({
+								"id": kid,
+								"type": "KPI",
+								"label": kname,
+								"props": {"kpi": k},
+							})
+							# Derive dependency edges from children
+							children = k.get("children") if isinstance(k, dict) else None
+							if isinstance(children, list):
+								for ch in children:
+									if ch:
+										edges.append({"source": ch, "target": kid, "type": "DEPENDS_ON"})
+						except Exception:
+							continue
+				# Also absorb explicit edges if provided
+				try:
+					if isinstance(resp.get("edges"), list):
+						for e in resp.get("edges"):
+							try:
+								src = e.get("source") or e.get("from")
+								tgt = e.get("target") or e.get("to")
+								et = e.get("type") or "DEPENDS_ON"
+								if src and tgt:
+									edges.append({"source": src, "target": tgt, "type": et})
+							except Exception:
+								continue
+				except Exception:
+					pass
+				graph = {"nodes": nodes, "edges": edges}
 		# Fallback minimal graph of key columns only
-		if not (isinstance(graph, dict) and isinstance(graph.get("nodes"), list) and graph["nodes"]):
-			nodes = []
-			for t in req.tables:
-				fq = f"{kpi_service.project_id}.{t.datasetId}.{t.tableId}"
-				nodes.append({"id": f"col_{t.tableId}_id", "type": "Column", "label": f"{t.tableId}.id", "props": {"qualified_name": fq, "name": "id"}})
-			graph = {"nodes": nodes, "edges": []}
+			if not (isinstance(graph, dict) and isinstance(graph.get("nodes"), list) and graph["nodes"]):
+				nodes = []
+				for t in req.tables:
+					# Minimal KPI placeholder per table
+					kid = f"kpi_{t.tableId}_count"
+					nodes.append({"id": kid, "type": "KPI", "label": f"{t.tableId} Count", "props": {"kpi": {"id": kid, "name": f"{t.tableId} Count", "type": "atomic", "description": f"Count of rows in {t.tableId}", "time_grain": "MONTH", "dimensions": [], "children": [], "formula": "", "sources": [{"table": f"{kpi_service.project_id}.{t.datasetId}.{t.tableId}", "roles": {"id": "id", "measure": "*", "timestamp": None, "dimension_keys": []}}], "null_policy": "treat_null_as_zero", "owners": ["analytics_team"], "version": "v1.0"}}})
+				graph = {"nodes": nodes, "edges": []}
 		name = req.name or (req.tables[0].tableId if req.tables else "Thought Graph")
 		return {"graph": graph, "name": name}
 	except Exception as exc:
